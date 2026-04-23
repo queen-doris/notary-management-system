@@ -1,0 +1,23 @@
+export const FIRST_THRESHOLD_PERCENTAGE = 0;
+export const SECOND_THRESHOLD_PERCENTAGE = 0.1;
+export const THIRD_THRESHOLD_PERCENTAGE = 0.2;
+export const FOUTH_THRESHOLD_PERCENTAGE = 0.3;
+export const FIRST_THRESHOLD_TAX = 0;
+export const SECOND_THRESHOLD_TAX = 4000;
+export const THIRD_THRESHOLD_TAX = 20000;
+export const FIRST_THRESHOLD_LOWER_BOUNDARY = 0;
+export const FIRST_THRESHOLD_UPPER_BOUNDARY = 60000;
+export const SECOND_THRESHOLD_LOWER_BOUNDARY = 60001;
+export const SECOND_THRESHOLD_UPPER_BOUNDARY = 100000;
+export const THIRD_THRESHOLD_LOWER_BOUNDARY = 100001;
+export const THIRD_THRESHOLD_UPPER_BOUNDARY = 200000;
+export const FOUTH_THRESHOLD_LOWER_BOUNDARY = 200001;
+// RSSB Contributions (Rwanda Social Security Board)
+export const NSSF_EE_PERCENTAGE = 0.06; // 6% employee - Pension Scheme
+export const NSSF_ER_PERCENTAGE = 0.06; // 6% employer - Pension Scheme
+export const MEDICAL_EE_PERCENTAGE = 0.075; // 7.5% employee - Medical Insurance (RSSB)
+export const MEDICAL_ER_PERCENTAGE = 0.075; // 7.5% employer - Medical Insurance (RSSB)
+export const MAT_EE_PERCENTAGE = 0.003; // 0.3% employee - Maternity Benefits
+export const MAT_ER_PERCENTAGE = 0.003; // 0.3% employer - Maternity Benefits
+export const OH_ER_PERCENTAGE = 0.02; // 2% employer only - Occupational Hazards
+export const CBHI_PERCENTAGE = 0.005; // 0.5% employee - Community-Based Health Insurance (on net after deductions)
