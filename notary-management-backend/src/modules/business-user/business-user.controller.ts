@@ -198,7 +198,7 @@ export class BusinessUserController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(EUserRole.SUPERADMIN)
+  @Roles(EUserRole.SUPERADMIN, EBusinessRole.OWNER)
   @Patch(':id')
   async update(@Param('id') id: string, @Body() dto: UpdateBusinessUserDto) {
     const membership = await this.businessUserService.updateMembership(id, dto);

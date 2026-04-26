@@ -28,6 +28,13 @@ import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { EmployeeLeave } from './shared/entities/employee-leave.entity';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { NotaryModule } from './modules/notary/notary.module';
+import { BooksModule } from './modules/books/books.module';
+import { BillModule } from './modules/bill/bill.module';
+import { ClientModule } from './modules/client/client.module';
+import { ServiceCatalogModule } from './modules/service-catalog/service-catalog.module';
+import { SecretariatServiceModule } from './modules/secretariat-service/secretariat-service.module';
+import { NotaryServiceModule } from './modules/notary-service/notary-service.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -107,6 +114,13 @@ import { AppService } from './app.service';
     ScheduleModule.forRoot(),
     FileModule,
     CloudinaryModule,
+    ClientModule,
+    BillModule,
+    BooksModule,
+    NotaryModule,
+    ServiceCatalogModule,
+    NotaryServiceModule,
+    SecretariatServiceModule,
   ],
   controllers: [AppController],
   providers: [AppService],

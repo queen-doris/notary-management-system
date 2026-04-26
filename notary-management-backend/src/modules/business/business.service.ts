@@ -7,6 +7,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -27,6 +29,9 @@ import { EEmploymentStatus } from 'src/shared/enums/employee-status.enum';
 import { PutOnLeaveDTO } from './dto/put-on-leave.dto';
 import { EmployeeLeave } from 'src/shared/entities/employee-leave.entity';
 import { BusinessQueryDto } from './dto/business-query.dto';
+import { BooksService } from '../books/books.service';
+import { NotaryServiceService } from '../notary-service/notary-service.service';
+import { SecretariatServiceService } from '../secretariat-service/secretariat-service.service';
 
 type RegisterBusinessDto = Partial<Business> & {
   businessRegistrationNumber: string;
@@ -49,7 +54,15 @@ export class BusinessService {
   @InjectRepository(BusinessUser)
   businessUserRepository: Repository<BusinessUser>;
 
-  constructor(private readonly businessUserService: BusinessUserService) {}
+  constructor(
+    private readonly businessUserService: BusinessUserService,
+    @Inject(forwardRef(() => BooksService))
+    private readonly booksService: BooksService,
+    @Inject(forwardRef(() => NotaryServiceService))
+    private readonly notaryServiceService: NotaryServiceService,
+    @Inject(forwardRef(() => SecretariatServiceService))
+    private readonly secretariatServiceService: SecretariatServiceService,
+  ) {}
 
   async registerBusiness(
     userId: string,
@@ -100,6 +113,14 @@ export class BusinessService {
       businessId: savedBusiness.id,
       roles: [EBusinessRole.OWNER],
     });
+
+    await this.booksService.initializeBusinessBooks(savedBusiness.id);
+    // Initialize notary services (with all sub-services)
+    await this.notaryServiceService.initializeDefaultServices(savedBusiness.id);
+    // Initialize secretariat services
+    await this.secretariatServiceService.initializeDefaultServices(
+      savedBusiness.id,
+    );
 
     return {
       status: 'SUCCESS',
