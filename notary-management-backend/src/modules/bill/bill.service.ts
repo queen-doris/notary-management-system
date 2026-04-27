@@ -232,7 +232,7 @@ export class BillService {
     userId: string,
     businessId: string,
     isStaff: boolean,
-    userRole: string,
+    userRoles: EBusinessRole,
     dto: CreateBillDto,
   ): Promise<any> {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -932,7 +932,7 @@ export class BillService {
     billId: string,
     businessId: string,
     userId: string,
-    userRole: string,
+    userRoles: EBusinessRole,
     notaryItems?: NotaryServiceItemDto[],
     secretariatItems?: SecretariatServiceItemDto[],
   ): Promise<any> {
@@ -1138,7 +1138,7 @@ export class BillService {
     billId: string,
     businessId: string,
     userId: string,
-    userRole: string,
+    userRoles: EBusinessRole,
     dto: UpdateBillStatusDto,
   ): Promise<any> {
     const bill = await this.billRepository.findOne({

@@ -32,7 +32,6 @@ import { NotaryModule } from './modules/notary/notary.module';
 import { BooksModule } from './modules/books/books.module';
 import { BillModule } from './modules/bill/bill.module';
 import { ClientModule } from './modules/client/client.module';
-import { ServiceCatalogModule } from './modules/service-catalog/service-catalog.module';
 import { SecretariatServiceModule } from './modules/secretariat-service/secretariat-service.module';
 import { NotaryServiceModule } from './modules/notary-service/notary-service.module';
 @Module({
@@ -118,7 +117,6 @@ import { NotaryServiceModule } from './modules/notary-service/notary-service.mod
     BillModule,
     BooksModule,
     NotaryModule,
-    ServiceCatalogModule,
     NotaryServiceModule,
     SecretariatServiceModule,
   ],

@@ -24,9 +24,12 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { AuthenticatedRequest } from 'src/shared/interfaces/request.interface';
+import { ApiBearerAuth } from '@nestjs/swagger/dist/decorators/api-bearer.decorator';
+import { EBusinessRole } from 'src/shared/enums/business-role.enum';
 
 @Controller('bills')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth('access-token')
 export class BillController {
   constructor(private readonly billService: BillService) {}
 
@@ -35,10 +38,11 @@ export class BillController {
    * Roles: receptionist, notary, secretariat, business_owner
    */
   @Post()
+    @Roles( EBusinessRole.RECEPTIONIST, EBusinessRole.SECRETARIAT, EBusinessRole.OWNER)
   async createBill(@Req() req: AuthenticatedRequest, @Body() dto: CreateBillDto) {
     return this.billService.createBill(
       req.user.id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.is_staff || false,
       req.user.role,
       dto,
@@ -50,10 +54,11 @@ export class BillController {
    * Roles: receptionist, notary, secretariat, business_owner
    */
   @Post('add-items')
+  @Roles(EBusinessRole.RECEPTIONIST, EBusinessRole.SECRETARIAT, EBusinessRole.OWNER)
   async addItemsToBill(@Req() req: AuthenticatedRequest, @Body() dto: AddItemsToBillDto) {
     return this.billService.addItemsToBill(
       dto.bill_id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
       dto.notary_items,
@@ -66,6 +71,7 @@ export class BillController {
    * Roles: business_owner, notary, accountant, secretariat
    */
   @Get()
+  @Roles(EBusinessRole.RECEPTIONIST, EBusinessRole.SECRETARIAT, EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
   async getAllBills(
     @Req() req: AuthenticatedRequest,
     @Query('status') status?: string,
@@ -76,7 +82,7 @@ export class BillController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.billService.getAllBills(req.user.business_id, {
+    return this.billService.getAllBills(req.user.businessId, {
       status: status as any,
       bill_type: billType as any,
       client_id: clientId,
@@ -92,8 +98,9 @@ export class BillController {
    * Roles: accountant, business_owner
    */
   @Get('pending')
+    @Roles(EBusinessRole.ACCOUNTANT, EBusinessRole.OWNER, EBusinessRole.SECRETARIAT, EBusinessRole.RECEPTIONIST)
   async getPendingBills(@Req() req: AuthenticatedRequest) {
-    return this.billService.getPendingBills(req.user.business_id);
+    return this.billService.getPendingBills(req.user.businessId);
   }
 
   /**
@@ -102,29 +109,34 @@ export class BillController {
    */
   @Get('paid-unserved')
   async getPaidUnservedBills(@Req() req: AuthenticatedRequest) {
-    return this.billService.getPaidUnservedBills(req.user.business_id);
+    return this.billService.getPaidUnservedBills(req.user.businessId);
   }
 
   /**
    * Get bill by ID
    */
   @Get(':id')
+      @Roles(EBusinessRole.ACCOUNTANT, EBusinessRole.OWNER, EBusinessRole.SECRETARIAT, EBusinessRole.RECEPTIONIST)
   async getBillById(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.billService.getBillById(id, req.user.business_id);
+    return this.billService.getBillById(id, req.user.businessId);
   }
 
   /**
    * Get bill by bill number
    */
   @Get('number/:billNumber')
+      @Roles(EBusinessRole.ACCOUNTANT, EBusinessRole.OWNER, EBusinessRole.SECRETARIAT, EBusinessRole.RECEPTIONIST)
+
   async getBillByNumber(@Req() req: AuthenticatedRequest, @Param('billNumber') billNumber: string) {
-    return this.billService.getBillByNumber(billNumber, req.user.business_id);
+    return this.billService.getBillByNumber(billNumber, req.user.businessId);
   }
 
   /**
    * Update bill status (paid, served, rejected, refunded)
    */
 @Patch(':id/status')
+    @Roles(EBusinessRole.ACCOUNTANT, EBusinessRole.OWNER, EBusinessRole.SECRETARIAT, EBusinessRole.RECEPTIONIST)
+
 async updateBillStatus(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
@@ -132,7 +144,7 @@ async updateBillStatus(
 ) {
     return this.billService.updateBillStatus(
         id,                      // billId
-        req.user.business_id,    // businessId
+        req.user.businessId,    // businessId
         req.user.id,             // userId
         req.user.role,           // userRole
         dto,                     // dto
@@ -143,7 +155,8 @@ async updateBillStatus(
    * Get bill statistics for dashboard
    */
   @Get('stats/dashboard')
+      @Roles(EBusinessRole.ACCOUNTANT, EBusinessRole.OWNER, EBusinessRole.SECRETARIAT, EBusinessRole.RECEPTIONIST)
   async getBillStats(@Req() req: AuthenticatedRequest, @Query('date') date?: string) {
-    return this.billService.getBillStats(req.user.business_id, date);
+    return this.billService.getBillStats(req.user.businessId, date);
   }
 }

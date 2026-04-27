@@ -206,18 +206,16 @@ export class BooksService {
   async updateBookTracker(
     businessId: string,
     userId: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     bookType: BookType,
     dto: UpdateBookTrackerDto,
   ): Promise<BookTracker> {
     // Only OWNER can update book trackers
-    const isOwner = userBusinessRoles.includes(EBusinessRole.OWNER);
-
-    if (!isOwner) {
+    const isOwner = userRoles === EBusinessRole.OWNER;
+    if (!isOwner)
       throw new ForbiddenException(
-        'Only business owner can update book trackers',
+        'Only business owner can create custom secretariat services',
       );
-    }
 
     const tracker = await this.getBookTracker(businessId, bookType);
     const config = this.getDefaultBookConfig(bookType);

@@ -20,9 +20,11 @@ import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { EBusinessRole } from 'src/shared/enums/business-role.enum';
 import { AuthenticatedRequest } from 'src/shared/interfaces/request.interface';
+import { ApiBearerAuth } from '@nestjs/swagger';
 
 @Controller('clients')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth('access-token')
 export class ClientController {
   constructor(private readonly clientService: ClientService) {}
 
@@ -31,6 +33,7 @@ export class ClientController {
    * Roles: receptionist, notary, business_owner (everyone except accountant)
    */
   @Post()
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.SECRETARIAT,
@@ -41,7 +44,7 @@ export class ClientController {
     @Body() dto: CreateClientDto,
   ) {
     return this.clientService.createClient(
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       dto,
     );
@@ -52,6 +55,7 @@ export class ClientController {
    * Roles: everyone except accountant
    */
   @Get('search')
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.SECRETARIAT,
@@ -61,7 +65,7 @@ export class ClientController {
     @Req() req: AuthenticatedRequest,
     @Query() searchDto: SearchClientDto,
   ) {
-    return this.clientService.searchClients(req.user.business_id, searchDto);
+    return this.clientService.searchClients(req.user.businessId, searchDto);
   }
 
   /**
@@ -69,6 +73,7 @@ export class ClientController {
    * Roles: everyone except accountant
    */
   @Get(':id')
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.SECRETARIAT,
@@ -78,7 +83,7 @@ export class ClientController {
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
   ) {
-    return this.clientService.getClientById(id, req.user.business_id);
+    return this.clientService.getClientById(id, req.user.businessId);
   }
 
   /**
@@ -86,6 +91,7 @@ export class ClientController {
    * Roles: everyone except accountant
    */
   @Get('id-number/:idNumber')
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.SECRETARIAT,
@@ -97,7 +103,7 @@ export class ClientController {
   ) {
     return this.clientService.getClientByIdNumber(
       idNumber,
-      req.user.business_id,
+      req.user.businessId,
     );
   }
 
@@ -106,6 +112,7 @@ export class ClientController {
    * Roles: everyone except accountant
    */
   @Get('phone/:phone')
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.SECRETARIAT,
@@ -115,7 +122,7 @@ export class ClientController {
     @Req() req: AuthenticatedRequest,
     @Param('phone') phone: string,
   ) {
-    return this.clientService.getClientByPhone(phone, req.user.business_id);
+    return this.clientService.getClientByPhone(phone, req.user.businessId);
   }
 
   /**
@@ -123,6 +130,7 @@ export class ClientController {
    * Roles: receptionist, notary, business_owner
    */
   @Put(':id')
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.SECRETARIAT,
@@ -135,9 +143,9 @@ export class ClientController {
   ) {
     return this.clientService.updateClient(
       id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
-      req.user.role as EBusinessRole,
+      req.user.role,
       dto,
     );
   }
@@ -159,9 +167,9 @@ export class ClientController {
   ) {
     return this.clientService.verifyClient(
       id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
-      req.user.role as EBusinessRole,
+      req.user.role,
       notes,
     );
   }
@@ -171,6 +179,7 @@ export class ClientController {
    * Roles: notary, business_owner
    */
   @Delete(':id')
+  @ApiBearerAuth('access-token')
   @Roles(
     EBusinessRole.RECEPTIONIST,
     EBusinessRole.OWNER,
@@ -182,8 +191,8 @@ export class ClientController {
   ) {
     return this.clientService.deactivateClient(
       id,
-      req.user.business_id,
-      req.user.role as EBusinessRole,
+      req.user.businessId,
+      req.user.role,
     );
   }
 
@@ -192,8 +201,9 @@ export class ClientController {
    * Roles: business_owner, notary
    */
   @Get('stats/dashboard')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   async getClientStats(@Req() req: AuthenticatedRequest) {
-    return this.clientService.getClientStats(req.user.business_id);
+    return this.clientService.getClientStats(req.user.businessId);
   }
 }

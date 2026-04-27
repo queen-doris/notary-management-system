@@ -19,9 +19,11 @@ import { BookType } from '../../shared/enums/book-type.enum';
 import { AuthenticatedRequest } from '../../shared/interfaces/request.interface';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { EBusinessRole } from 'src/shared/enums/business-role.enum';
+import { ApiBearerAuth } from '@nestjs/swagger/dist/decorators/api-bearer.decorator';
 
 @Controller('books')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth('access-token')
 export class BooksController {
   constructor(private readonly booksService: BooksService) {}
 
@@ -29,27 +31,30 @@ export class BooksController {
    * Get all book trackers for the business
    */
   @Get('trackers')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   async getBookTrackers(@Req() req: AuthenticatedRequest) {
-    return this.booksService.getBookTrackers(req.user.business_id);
+    return this.booksService.getBookTrackers(req.user.businessId);
   }
 
   /**
    * Get a specific book tracker
    */
   @Get('trackers/:bookType')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   async getBookTracker(
     @Req() req: AuthenticatedRequest,
     @Param('bookType') bookType: BookType,
   ) {
-    return this.booksService.getBookTracker(req.user.business_id, bookType);
+    return this.booksService.getBookTracker(req.user.businessId, bookType);
   }
 
   /**
    * Update a book tracker (Only OWNER)
    */
   @Put('trackers/:bookType')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   async updateBookTracker(
     @Req() req: AuthenticatedRequest,
@@ -57,9 +62,9 @@ export class BooksController {
     @Body() dto: UpdateBookTrackerDto,
   ) {
     return this.booksService.updateBookTracker(
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
-      req.user.business_roles || [],
+      req.user.role,
       bookType,
       dto,
     );
@@ -69,6 +74,7 @@ export class BooksController {
    * Get records for a specific book
    */
   @Get(':bookType/records')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   async getBookRecords(
     @Req() req: AuthenticatedRequest,
@@ -79,7 +85,7 @@ export class BooksController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.booksService.getBookRecords(req.user.business_id, bookType, {
+    return this.booksService.getBookRecords(req.user.businessId, bookType, {
       start_date: startDate,
       end_date: endDate,
       client_id: clientId,
@@ -92,6 +98,7 @@ export class BooksController {
    * Search records across all books
    */
   @Get('records/search')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   async searchRecords(
     @Req() req: AuthenticatedRequest,
@@ -102,7 +109,7 @@ export class BooksController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.booksService.searchRecords(req.user.business_id, {
+    return this.booksService.searchRecords(req.user.businessId, {
       q,
       book_type: bookType,
       start_date: startDate,
@@ -116,8 +123,9 @@ export class BooksController {
    * Get book statistics
    */
   @Get('stats/summary')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   async getBookStatistics(@Req() req: AuthenticatedRequest) {
-    return this.booksService.getBookStatistics(req.user.business_id);
+    return this.booksService.getBookStatistics(req.user.businessId);
   }
 }

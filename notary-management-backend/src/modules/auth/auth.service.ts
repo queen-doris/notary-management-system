@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable prefer-const */
 import {
   BadRequestException,
   Injectable,
@@ -48,7 +51,9 @@ export class AuthService {
     const { phone, password } = dto;
 
     const normalizedPhone = PhoneUtils.normalize(phone);
-    const user = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
+    const user = await this.userRepository.findOne({
+      where: { phone: normalizedPhone },
+    });
     if (!user)
       throw new UnauthorizedException('Phone number or password is incorrect.');
 
@@ -59,14 +64,18 @@ export class AuthService {
     if (!user.isVerified) {
       // Send a new verification code automatically
       try {
-        await this.resendVerificationCode(normalizedPhone, EOtpType.VERIFICATION);
+        await this.resendVerificationCode(
+          normalizedPhone,
+          EOtpType.VERIFICATION,
+        );
       } catch (e) {
         this.logger.warn(`Failed to resend verification code: ${e}`);
       }
 
       const response = {
         statusCode: 401,
-        message: 'Your account is not yet verified. A new verification code has been sent.',
+        message:
+          'Your account is not yet verified. A new verification code has been sent.',
         errorCode: 'ACCOUNT_NOT_VERIFIED',
         phone: normalizedPhone,
       };
@@ -170,7 +179,10 @@ export class AuthService {
       throw new UnauthorizedException('Your account is not yet verified.');
     }
 
-    if (user.status === EUserStatus.SUSPENDED || user.status === EUserStatus.INACTIVE) {
+    if (
+      user.status === EUserStatus.SUSPENDED ||
+      user.status === EUserStatus.INACTIVE
+    ) {
       throw new UnauthorizedException(
         'Your account is not active, contact support for further information.',
       );
@@ -321,7 +333,9 @@ export class AuthService {
     return 'Password changed successfully.';
   };
 
-  forgotPassword = async (dto: ForgotPasswordDto): Promise<string | undefined> => {
+  forgotPassword = async (
+    dto: ForgotPasswordDto,
+  ): Promise<string | undefined> => {
     const normalizedPhone = PhoneUtils.normalize(dto.phone);
     const user: User | null = await this.userRepository.findOne({
       where: { phone: normalizedPhone },
@@ -344,7 +358,7 @@ export class AuthService {
         //   `Password reset code already sent to ${user.email ? user.email : user.phone}. Please wait before requesting a new one.`,
         // );
 
-        await this.resendVerificationCode(dto.phone, EOtpType.PASSWORD_RESET)
+        await this.resendVerificationCode(dto.phone, EOtpType.PASSWORD_RESET);
         return;
       } else {
         // Delete expired OTP
@@ -396,7 +410,9 @@ export class AuthService {
     // Normalize phone to international format for lookup
     const normalizedPhone = PhoneUtils.normalize(phone);
 
-    const user = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
+    const user = await this.userRepository.findOne({
+      where: { phone: normalizedPhone },
+    });
     if (!user) {
       throw new NotFoundException(`User with phone ${phone} not found.`);
     }
@@ -449,7 +465,9 @@ export class AuthService {
       );
       const membershipCount = memberships.length;
       const hasSingleMembership = membershipCount === 1;
-      const primaryMembership = hasSingleMembership ? memberships[0] : undefined;
+      const primaryMembership = hasSingleMembership
+        ? memberships[0]
+        : undefined;
       const businessId = primaryMembership?.businessId;
       let businessRoles = primaryMembership?.roles ?? [];
 
@@ -548,7 +566,9 @@ export class AuthService {
     type: EOtpType,
   ): Promise<string> => {
     const normalizedPhone = PhoneUtils.normalize(phone);
-    const user = await this.userRepository.findOne({ where: { phone: normalizedPhone } });
+    const user = await this.userRepository.findOne({
+      where: { phone: normalizedPhone },
+    });
     if (!user) {
       throw new NotFoundException(`User with phone ${phone} not found.`);
     }

@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Injectable,
   NotFoundException,
@@ -96,18 +96,14 @@ export class NotaryServiceService {
   async addSubService(
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     serviceName: NotaryServiceName,
     dto: CreateNotarySubServiceDto,
   ): Promise<NotaryService> {
-    const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(EBusinessRole.OWNER));
+    const isOwner = userRoles === EBusinessRole.OWNER;
     if (!isOwner)
       throw new ForbiddenException(
-        'Only business owner can add notary sub-services',
+        'Only business owner can create custom secretariat services',
       );
 
     const existing = await this.notaryServiceRepository.findOne({
@@ -137,17 +133,13 @@ export class NotaryServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     dto: UpdateNotarySubServiceDto,
   ): Promise<NotaryService> {
-    const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(EBusinessRole.OWNER));
+    const isOwner = userRoles === EBusinessRole.OWNER;
     if (!isOwner)
       throw new ForbiddenException(
-        'Only business owner can update notary sub-services',
+        'Only business owner can create custom secretariat services',
       );
 
     const service = await this.getSubServiceById(id, businessId);
@@ -159,18 +151,13 @@ export class NotaryServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
   ): Promise<{ message: string }> {
-    const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(EBusinessRole.OWNER));
+    const isOwner = userRoles === EBusinessRole.OWNER;
     if (!isOwner)
       throw new ForbiddenException(
-        'Only business owner can delete notary sub-services',
+        'Only business owner can create custom secretariat services',
       );
-
     const service = await this.getSubServiceById(id, businessId);
     service.is_active = false;
     await this.notaryServiceRepository.save(service);

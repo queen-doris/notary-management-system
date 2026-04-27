@@ -35,10 +35,9 @@ export class NotaryController {
     @Body() dto: ServeClientDto,
   ) {
     return this.notaryService.serveClient(
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
       dto,
     );
   }
@@ -54,10 +53,9 @@ export class NotaryController {
     @Body() dto: RejectClientDto,
   ) {
     return this.notaryService.rejectClient(
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
       dto,
     );
   }
@@ -76,7 +74,7 @@ export class NotaryController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
   ) {
-    return this.notaryService.getAllRecords(req.user.business_id, {
+    return this.notaryService.getAllRecords(req.user.businessId, {
       book_type: bookType as any,
       start_date: startDate,
       end_date: endDate,
@@ -92,7 +90,7 @@ export class NotaryController {
   @Get('records/:id')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT) // Allow receptionist and secretariat to view individual records
   async getRecord(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
-    return this.notaryService.getRecord(id, req.user.business_id);
+    return this.notaryService.getRecord(id, req.user.businessId);
   }
 
   /**
@@ -104,6 +102,6 @@ export class NotaryController {
     @Req() req: AuthenticatedRequest,
     @Param('clientId') clientId: string,
   ) {
-    return this.notaryService.getClientRecords(clientId, req.user.business_id);
+    return this.notaryService.getClientRecords(clientId, req.user.businessId);
   }
 }

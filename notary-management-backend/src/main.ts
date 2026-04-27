@@ -54,11 +54,15 @@ async function bootstrap() {
     .setTitle('Notary Management System Backend APIs')
     .setDescription('Backend APIs documentation for Notary Managent System.')
     .setVersion('1.0.0')
-    .addBearerAuth({
-      type: 'http',
-      scheme: 'bearer',
-      bearerFormat: 'JWT',
-    })
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+      'access-token',
+    )
+
     .build();
 
   const document = SwaggerModule.createDocument(app, options);

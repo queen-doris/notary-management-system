@@ -20,43 +20,53 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { AuthenticatedRequest } from '../../shared/interfaces/request.interface';
 import { NotaryServiceName } from '../../shared/enums/notary-service-name.enum';
 import { EBusinessRole } from 'src/shared/enums/business-role.enum';
+import { ApiBearerAuth } from '@nestjs/swagger/dist/decorators/api-bearer.decorator';
 
 @Controller('notary-services')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@ApiBearerAuth()
 export class NotaryServiceController {
   constructor(private readonly notaryServiceService: NotaryServiceService) {}
 
   @Get()
-  @Roles(EBusinessRole.OWNER, EBusinessRole.RECEPTIONIST, EBusinessRole.OWNER)
+  @Roles(
+    EBusinessRole.OWNER,
+    EBusinessRole.RECEPTIONIST,
+    EBusinessRole.ACCOUNTANT,
+  )
   async getAllServices(@Req() req: AuthenticatedRequest) {
-    return this.notaryServiceService.getAllServices(req.user.business_id);
+    return this.notaryServiceService.getAllServices(req.user.businessId);
   }
 
   @Get('service/:serviceName')
-  @Roles(EBusinessRole.OWNER, EBusinessRole.RECEPTIONIST, EBusinessRole.OWNER)
+  @ApiBearerAuth('access-token')
+  @Roles(
+    EBusinessRole.OWNER,
+    EBusinessRole.RECEPTIONIST,
+    EBusinessRole.ACCOUNTANT,
+  )
   async getServicesByServiceName(
     @Req() req: AuthenticatedRequest,
     @Param('serviceName') serviceName: NotaryServiceName,
   ) {
     return this.notaryServiceService.getServicesByServiceName(
-      req.user.business_id,
+      req.user.businessId,
       serviceName,
     );
   }
 
   @Get('sub-service/:id')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.RECEPTIONIST)
   async getSubServiceById(
     @Req() req: AuthenticatedRequest,
     @Param('id') id: string,
   ) {
-    return this.notaryServiceService.getSubServiceById(
-      id,
-      req.user.business_id,
-    );
+    return this.notaryServiceService.getSubServiceById(id, req.user.businessId);
   }
 
   @Post('service/:serviceName/sub-service')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   async addSubService(
     @Req() req: AuthenticatedRequest,
@@ -64,16 +74,16 @@ export class NotaryServiceController {
     @Body() dto: CreateNotarySubServiceDto,
   ) {
     return this.notaryServiceService.addSubService(
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
       serviceName,
       dto,
     );
   }
 
   @Put('sub-service/:id')
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   async updateSubService(
     @Req() req: AuthenticatedRequest,
@@ -82,15 +92,15 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.updateSubService(
       id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
       dto,
     );
   }
 
   @Delete('sub-service/:id')
+  @ApiBearerAuth()
   @Roles(EBusinessRole.OWNER)
   async deleteSubService(
     @Req() req: AuthenticatedRequest,
@@ -98,10 +108,9 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.deleteSubService(
       id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
     );
   }
 }

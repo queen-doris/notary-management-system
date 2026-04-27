@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Injectable,
   NotFoundException,
@@ -96,16 +96,11 @@ export class SecretariatServiceService {
   async createCustomService(
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     dto: CreateSecretariatServiceDto,
   ): Promise<SecretariatService> {
     const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(
-          EBusinessRole.OWNER || EBusinessRole.SECRETARIAT,
-        ));
+      userRoles === (EBusinessRole.OWNER || EBusinessRole.SECRETARIAT);
     if (!isOwner)
       throw new ForbiddenException(
         'Only business owner can create custom secretariat services',
@@ -132,16 +127,11 @@ export class SecretariatServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRole: EBusinessRole,
     dto: UpdateSecretariatServiceDto,
   ): Promise<SecretariatService> {
     const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(
-          EBusinessRole.OWNER || EBusinessRole.SECRETARIAT,
-        ));
+      userRole === (EBusinessRole.OWNER || EBusinessRole.SECRETARIAT);
     if (!isOwner)
       throw new ForbiddenException(
         'Only business owner can update secretariat services',
@@ -156,13 +146,10 @@ export class SecretariatServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRole: EBusinessRole,
   ): Promise<{ message: string }> {
     const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(EBusinessRole.OWNER));
+      userRole === EBusinessRole.OWNER || EBusinessRole.SECRETARIAT;
     if (!isOwner)
       throw new ForbiddenException(
         'Only business owner can delete secretariat services',

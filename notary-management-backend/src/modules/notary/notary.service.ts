@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
@@ -46,20 +45,14 @@ export class NotaryService {
    */
   private async checkNotaryPermission(
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     businessId: string,
   ): Promise<void> {
-    const isOwner =
-      userRole === EUserRole.SUPERADMIN ||
-      (userRole === EUserRole.STAFF &&
-        userBusinessRoles.includes(EBusinessRole.OWNER));
-
-    if (!isOwner && !userBusinessRoles.includes(EBusinessRole.OWNER)) {
+    const isOwner = userRoles === EBusinessRole.OWNER;
+    if (!isOwner)
       throw new ForbiddenException(
-        'Only business owner can serve or reject clients',
+        'Only business owner can create custom secretariat services',
       );
-    }
   }
 
   /**
@@ -109,8 +102,7 @@ export class NotaryService {
   async serveClient(
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     dto: ServeClientDto,
   ): Promise<NotaryRecord> {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -119,12 +111,7 @@ export class NotaryService {
 
     try {
       // 1. Check permission
-      await this.checkNotaryPermission(
-        userId,
-        userRole,
-        userBusinessRoles,
-        businessId,
-      );
+      await this.checkNotaryPermission(userId, userRoles, businessId);
 
       // 2. Get the bill with client information
       const bill = await this.billRepository.findOne({
@@ -290,8 +277,7 @@ export class NotaryService {
   async rejectClient(
     businessId: string,
     userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
+    userRoles: EBusinessRole,
     dto: RejectClientDto,
   ): Promise<{ message: string; bill_id: string }> {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -300,12 +286,7 @@ export class NotaryService {
 
     try {
       // 1. Check permission
-      await this.checkNotaryPermission(
-        userId,
-        userRole,
-        userBusinessRoles,
-        businessId,
-      );
+      await this.checkNotaryPermission(userId, userRoles, businessId);
 
       // 2. Get the bill
       const bill = await this.billRepository.findOne({

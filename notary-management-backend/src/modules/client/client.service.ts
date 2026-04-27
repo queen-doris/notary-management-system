@@ -50,7 +50,7 @@ export class ClientService {
 
     // Check if client with same ID number already exists in this business
     const existingClient = await this.clientRepository.findOne({
-      where: { id_number: dto.id_number, business_id: businessId },
+      where: { id_number: dto.id_number, business: { id: businessId } },
     });
     if (existingClient) {
       throw new ConflictException(
@@ -61,7 +61,7 @@ export class ClientService {
     // Check if client with same phone exists (if phone provided)
     if (dto.phone) {
       const existingPhone = await this.clientRepository.findOne({
-        where: { phone: dto.phone, business_id: businessId },
+        where: { phone: dto.phone, business: { id: businessId } },
       });
       if (existingPhone) {
         throw new ConflictException(
@@ -90,7 +90,7 @@ export class ClientService {
       partner_name: dto.partner_name,
       upi: dto.upi,
       notes: dto.notes,
-      business_id: businessId,
+      business: { id: businessId },
       is_active: true,
       verification_status: VerificationStatus.PENDING,
     });
@@ -196,8 +196,8 @@ export class ClientService {
   ): Promise<ClientResponseDto> {
     const client = await this.clientRepository.findOne({
       where: {
-        client_id: clientId,
-        business_id: businessId,
+        id: clientId,
+        business: { id: businessId },
         deleted_at: IsNull(),
       },
     });
@@ -220,7 +220,7 @@ export class ClientService {
     const client = await this.clientRepository.findOne({
       where: {
         id_number: idNumber,
-        business_id: businessId,
+        business: { id: businessId },
         deleted_at: IsNull(),
       },
     });
@@ -241,7 +241,7 @@ export class ClientService {
     businessId: string,
   ): Promise<ClientResponseDto> {
     const client = await this.clientRepository.findOne({
-      where: { phone, business_id: businessId, deleted_at: IsNull() },
+      where: { phone, business: { id: businessId }, deleted_at: IsNull() },
     });
 
     if (!client) {
@@ -268,16 +268,15 @@ export class ClientService {
       EBusinessRole.RECEPTIONIST,
       EBusinessRole.SECRETARIAT,
     ];
+
     if (!allowedRoles.includes(userRole)) {
-      throw new ForbiddenException(
-        'You do not have permission to update clients',
-      );
+      throw new ForbiddenException('Only authorized staff can verify clients');
     }
 
     const client = await this.clientRepository.findOne({
       where: {
-        client_id: clientId,
-        business_id: businessId,
+        id: clientId,
+        business: { id: businessId },
         deleted_at: IsNull(),
       },
     });
@@ -291,7 +290,7 @@ export class ClientService {
       const existing = await this.clientRepository.findOne({
         where: {
           id_number: dto.id_number,
-          business_id: businessId,
+          business: { id: businessId },
           deleted_at: IsNull(),
         },
       });
@@ -305,7 +304,7 @@ export class ClientService {
     // If updating phone, check for duplicates
     if (dto.phone && dto.phone !== client.phone) {
       const existing = await this.clientRepository.findOne({
-        where: { phone: dto.phone, business_id: businessId },
+        where: { phone: dto.phone, business: { id: businessId } },
       });
       if (existing) {
         throw new ConflictException(
@@ -345,34 +344,49 @@ export class ClientService {
     userRole: EBusinessRole,
     notes?: string,
   ): Promise<ClientResponseDto> {
+    // 1. Define allowed roles (business-level RBAC)
     const allowedRoles = [
       EBusinessRole.OWNER,
       EBusinessRole.RECEPTIONIST,
       EBusinessRole.SECRETARIAT,
     ];
-    if (!allowedRoles.includes(userRole)) {
-      throw new ForbiddenException(
-        'Only notary or business owner can verify clients',
-      );
+
+    // 2. Strict role validation
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      throw new ForbiddenException('Only authorized staff can verify clients');
     }
 
+    // 3. Find client safely (with soft delete protection)
     const client = await this.clientRepository.findOne({
-      where: { client_id: clientId, business_id: businessId },
+      where: {
+        id: clientId,
+        business: { id: businessId },
+        deleted_at: IsNull(),
+      },
     });
 
     if (!client) {
       throw new NotFoundException('Client not found');
     }
 
+    // 4. Prevent unnecessary overwriting if already verified
+    if (client.verification_status === VerificationStatus.VERIFIED) {
+      throw new BadRequestException('Client is already verified');
+    }
+
+    // 5. Apply verification
     client.verification_status = VerificationStatus.VERIFIED;
     client.verified_at = new Date();
     client.verified_by = userId;
-    if (notes) {
-      client.verification_notes = notes;
+
+    if (notes?.trim()) {
+      client.verification_notes = notes.trim();
     }
 
+    // 6. Save
     await this.clientRepository.save(client);
 
+    // 7. Return enriched response
     const stats = await this.getClientBillStats(clientId, businessId);
     return this.formatClientResponse(client, stats);
   }
@@ -385,15 +399,18 @@ export class ClientService {
     businessId: string,
     userRole: EBusinessRole,
   ): Promise<{ message: string }> {
-    const allowedRoles = [EBusinessRole.OWNER, EBusinessRole.SECRETARIAT];
+    const allowedRoles = [
+      EBusinessRole.OWNER,
+      EBusinessRole.RECEPTIONIST,
+      EBusinessRole.SECRETARIAT,
+    ];
+
     if (!allowedRoles.includes(userRole)) {
-      throw new ForbiddenException(
-        'Only business owner or notary can deactivate clients',
-      );
+      throw new ForbiddenException('Only authorized staff can verify clients');
     }
 
     const client = await this.clientRepository.findOne({
-      where: { id: clientId, business_id: businessId },
+      where: { id: clientId, business: { id: businessId } },
     });
 
     if (!client) {
@@ -450,7 +467,7 @@ export class ClientService {
     recent_bills: BillSummaryDto[];
   }> {
     const bills = await this.billRepository.find({
-      where: { client_id: clientId, business_id: businessId },
+      where: { id: clientId, business: { id: businessId } },
       order: { createdAt: 'DESC' },
       take: 5,
     });
@@ -481,7 +498,7 @@ export class ClientService {
     },
   ): ClientResponseDto {
     return {
-      id: client.client_id,
+      id: client.id,
       full_name: client.full_name,
       id_number: client.id_number,
       phone: client.phone,
@@ -522,12 +539,12 @@ export class ClientService {
     inactive: number;
   }> {
     const total = await this.clientRepository.count({
-      where: { business_id: businessId, deleted_at: IsNull() },
+      where: { business: { id: businessId }, deleted_at: IsNull() },
     });
 
     const verified = await this.clientRepository.count({
       where: {
-        business_id: businessId,
+        business: { id: businessId },
         verification_status: VerificationStatus.VERIFIED,
         deleted_at: IsNull(),
       },
@@ -535,7 +552,7 @@ export class ClientService {
 
     const pending = await this.clientRepository.count({
       where: {
-        business_id: businessId,
+        business: { id: businessId },
         verification_status: VerificationStatus.PENDING,
         deleted_at: IsNull(),
       },
@@ -543,19 +560,23 @@ export class ClientService {
 
     const unverified = await this.clientRepository.count({
       where: {
-        business_id: businessId,
+        business: { id: businessId },
         verification_status: VerificationStatus.UNVERIFIED,
         deleted_at: IsNull(),
       },
     });
 
     const active = await this.clientRepository.count({
-      where: { business_id: businessId, is_active: true, deleted_at: IsNull() },
+      where: {
+        business: { id: businessId },
+        is_active: true,
+        deleted_at: IsNull(),
+      },
     });
 
     const inactive = await this.clientRepository.count({
       where: {
-        business_id: businessId,
+        business: { id: businessId },
         is_active: false,
         deleted_at: IsNull(),
       },

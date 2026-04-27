@@ -4,9 +4,8 @@ import { EBusinessRole } from '../enums/business-role.enum';
 export interface AuthenticatedRequest extends Request {
   user: {
     id: string;
-    role: string; // SUPERADMIN or STAFF
-    business_id: string;
-    business_roles?: EBusinessRole[];
+    role: EBusinessRole;
+    businessId: string;
     is_staff?: boolean;
   };
 }

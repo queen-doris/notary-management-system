@@ -34,7 +34,7 @@ export class SecretariatServiceController {
     EBusinessRole.SECRETARIAT,
   )
   async getAllServices(@Req() req: AuthenticatedRequest) {
-    return this.secretariatServiceService.getAllServices(req.user.business_id);
+    return this.secretariatServiceService.getAllServices(req.user.businessId);
   }
 
   @Get(':id')
@@ -49,7 +49,7 @@ export class SecretariatServiceController {
   ) {
     return this.secretariatServiceService.getServiceById(
       id,
-      req.user.business_id,
+      req.user.businessId,
     );
   }
 
@@ -60,10 +60,9 @@ export class SecretariatServiceController {
     @Body() dto: CreateSecretariatServiceDto,
   ) {
     return this.secretariatServiceService.createCustomService(
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
       dto,
     );
   }
@@ -77,10 +76,9 @@ export class SecretariatServiceController {
   ) {
     return this.secretariatServiceService.updateService(
       id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
       dto,
     );
   }
@@ -93,10 +91,9 @@ export class SecretariatServiceController {
   ) {
     return this.secretariatServiceService.deleteService(
       id,
-      req.user.business_id,
+      req.user.businessId,
       req.user.id,
       req.user.role,
-      req.user.business_roles || [],
     );
   }
 }

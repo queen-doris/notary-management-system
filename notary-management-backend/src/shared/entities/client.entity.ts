@@ -5,7 +5,6 @@ import {
   OneToMany,
   JoinColumn,
   Index,
-  PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Business } from './business.entity';
 import { NotaryRecord } from './notary-record.entity';
@@ -18,9 +17,6 @@ import { Bill } from './bill.entity';
 @Index(['full_name', 'business_id'])
 @Index(['phone', 'business_id'])
 export class Client extends BaseEntity {
-  @PrimaryGeneratedColumn('uuid')
-  client_id: string;
-
   // Basic Information
   @Column({ type: 'varchar', length: 100 })
   full_name: string;
