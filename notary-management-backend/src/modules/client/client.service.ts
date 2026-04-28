@@ -166,7 +166,7 @@ export class ClientService {
     // Pagination
     const skip = (page - 1) * limit;
     query.skip(skip).take(limit);
-    query.orderBy('client.created_at', 'DESC');
+    query.orderBy('client.createdAt', 'DESC');
 
     const [data, total] = await query.getManyAndCount();
 
@@ -344,18 +344,6 @@ export class ClientService {
     userRole: EBusinessRole,
     notes?: string,
   ): Promise<ClientResponseDto> {
-    // 1. Define allowed roles (business-level RBAC)
-    const allowedRoles = [
-      EBusinessRole.OWNER,
-      EBusinessRole.RECEPTIONIST,
-      EBusinessRole.SECRETARIAT,
-    ];
-
-    // 2. Strict role validation
-    if (!userRole || !allowedRoles.includes(userRole)) {
-      throw new ForbiddenException('Only authorized staff can verify clients');
-    }
-
     // 3. Find client safely (with soft delete protection)
     const client = await this.clientRepository.findOne({
       where: {
@@ -399,16 +387,6 @@ export class ClientService {
     businessId: string,
     userRole: EBusinessRole,
   ): Promise<{ message: string }> {
-    const allowedRoles = [
-      EBusinessRole.OWNER,
-      EBusinessRole.RECEPTIONIST,
-      EBusinessRole.SECRETARIAT,
-    ];
-
-    if (!allowedRoles.includes(userRole)) {
-      throw new ForbiddenException('Only authorized staff can verify clients');
-    }
-
     const client = await this.clientRepository.findOne({
       where: { id: clientId, business: { id: businessId } },
     });
@@ -458,7 +436,7 @@ export class ClientService {
   /**
    * Get client's bill statistics
    */
-  private async getClientBillStats(
+  async getClientBillStats(
     clientId: string,
     businessId: string,
   ): Promise<{

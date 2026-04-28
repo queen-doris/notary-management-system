@@ -7,12 +7,13 @@ import { BillItem } from '../../shared/entities/bill-item.entity';
 import { Client } from '../../shared/entities/client.entity';
 import { Business } from '../../shared/entities/business.entity';
 import { User } from '../../shared/entities/user.entity';
+import { BusinessUser } from '../../shared/entities/business-user.entity';
+import { NotaryService } from '../../shared/entities/notary-service.entity';
+import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
+import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { Payment } from '../../shared/entities/payment.entity';
+import { Refund } from '../../shared/entities/refund.entity';
 import { AuthModule } from '../auth/auth.module';
-import { ClientModule } from '../client/client.module';
-import { BusinessUser } from 'src/shared/entities/business-user.entity';
-import { NotaryService as NotaryServiceEntity } from 'src/shared/entities/notary-service.entity';
-import { SecretariatService } from 'src/shared/entities/secretariat-service.entity';
-import { Payment } from 'src/shared/entities/payment.entity';
 
 @Module({
   imports: [
@@ -23,12 +24,13 @@ import { Payment } from 'src/shared/entities/payment.entity';
       Business,
       User,
       BusinessUser,
-      NotaryServiceEntity,
+      NotaryService,
       SecretariatService,
+      NotaryRecord,
       Payment,
+      Refund,
     ]),
     AuthModule,
-    ClientModule,
   ],
   controllers: [BillController],
   providers: [BillService],

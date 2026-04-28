@@ -3,7 +3,7 @@ import { Client } from './client.entity';
 import { Business } from './business.entity';
 import { User } from './user.entity';
 import { BillItem } from './bill-item.entity';
-import { BillStatus, BillType } from '../enums/bill.enum';
+import { BillStatus, BillType } from '../enums/bill-status.enum';
 import { MaritalStatus, VerificationStatus } from '../enums/client.enum';
 import { BaseEntity } from './base.entity';
 
@@ -80,10 +80,10 @@ export class Bill extends BaseEntity {
   @Column({ type: 'uuid' })
   business_id: string;
 
-  @Column({ type: 'uuid' })
+  @Column({ type: 'uuid', nullable: true })
   created_by: string;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: 'boolean', default: true })
   is_created_by_staff: boolean;
 
   // ============================================

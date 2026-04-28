@@ -1,24 +1,24 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
-import { BillStatus } from '../../../shared/enums/bill.enum';
+import { BillStatus } from '../../../shared/enums/bill-status.enum';
 
 export class UpdateBillStatusDto {
+  @ApiProperty({ description: 'Bill ID' })
+  @IsUUID()
+  bill_id: string;
+
+  @ApiProperty({ description: 'New bill status', enum: BillStatus })
   @IsEnum(BillStatus)
   status: BillStatus;
 
+  @ApiPropertyOptional({
+    description: 'Reason for status change (required for rejection)',
+  })
   @IsOptional()
   @IsString()
-  rejection_reason?: string;
+  reason?: string;
 
-  @IsOptional()
-  @IsString()
-  rejection_notes?: string;
-}
-
-export class MarkBillPaidDto {
-  @IsEnum(BillStatus)
-  status: BillStatus = BillStatus.PAID;
-
+  @ApiPropertyOptional({ description: 'Additional notes' })
   @IsOptional()
   @IsString()
   notes?: string;

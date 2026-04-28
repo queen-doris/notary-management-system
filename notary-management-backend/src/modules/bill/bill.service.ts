@@ -1,3 +1,4 @@
+/* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Injectable,
@@ -5,34 +6,71 @@ import {
   BadRequestException,
   ForbiddenException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import {
+  Repository,
+  DataSource,
+  Between,
+  IsNull,
+  Not,
+  Brackets,
+  In,
+} from 'typeorm';
 import { Bill } from '../../shared/entities/bill.entity';
 import { BillItem, ItemType } from '../../shared/entities/bill-item.entity';
 import { Client } from '../../shared/entities/client.entity';
 import { Business } from '../../shared/entities/business.entity';
 import { User } from '../../shared/entities/user.entity';
 import { BusinessUser } from '../../shared/entities/business-user.entity';
+import { NotaryService } from '../../shared/entities/notary-service.entity';
+import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
+import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { Payment } from '../../shared/entities/payment.entity';
+import { Refund } from '../../shared/entities/refund.entity';
 import {
   CreateBillDto,
   NotaryServiceItemDto,
   SecretariatServiceItemDto,
 } from './dto/create-bill.dto';
 import { UpdateBillStatusDto } from './dto/update-bill-status.dto';
-import { BillStatus, BillType } from '../../shared/enums/bill.enum';
+import { RecordPaymentDto } from './dto/record-payment.dto';
+import {
+  RejectBillDto,
+  RefundType,
+  RejectionReason,
+} from './dto/reject-bill.dto';
+import { ServeBillDto } from './dto/serve-bill.dto';
+import { ReportFiltersDto } from './dto/report-filters.dto';
+import {
+  BillResponseDto,
+  PaginatedResponseDto,
+  FinancialReportDto,
+  MinijustReportDto,
+  PaymentHistoryResponseDto,
+  RecordPaymentResponseDto,
+  RejectBillResponseDto,
+  ServeBillResponseDto,
+  DailySalesReportDto,
+} from './dto/bill-response.dto';
+import {
+  BillStatus,
+  BillType,
+  PaymentMethod,
+  PaymentStatus,
+} from '../../shared/enums/bill-status.enum';
+import { BookType } from '../../shared/enums/book-type.enum';
 import { EBusinessRole } from '../../shared/enums/business-role.enum';
 import { EUserRole } from '../../shared/enums/user-role.enum';
-import { NotaryService } from '../../shared/entities/notary-service.entity';
-import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
-import { Payment } from '../../shared/entities/payment.entity';
-// import { PaymentMethod } from 'src/shared/enums/payment-method.enum';
-import { PaymentStatus } from 'src/shared/enums/payment-status.enum';
-import { RecordPaymentDto, RefundPaymentDto } from './dto/record-payment.dto';
+import { VerificationStatus } from '../../shared/enums/client.enum';
+import { RecordStatus } from '../../shared/enums/record-status.enum';
+import { BookTracker } from '../../shared/interfaces/book-tracker.interface';
 
 @Injectable()
 export class BillService {
-  private readonly VAT_RATE = 0.18; // 18%
+  private readonly logger = new Logger(BillService.name);
+  private readonly VAT_RATE = 0.18;
 
   constructor(
     @InjectRepository(Bill)
@@ -51,17 +89,53 @@ export class BillService {
     private notaryServiceRepository: Repository<NotaryService>,
     @InjectRepository(SecretariatService)
     private secretariatServiceRepository: Repository<SecretariatService>,
-    private dataSource: DataSource,
+    @InjectRepository(NotaryRecord)
+    private notaryRecordRepository: Repository<NotaryRecord>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
+    @InjectRepository(Refund)
+    private refundRepository: Repository<Refund>,
+    private dataSource: DataSource,
   ) {}
 
-  /**
-   * Get creator information (name and role)
-   * For SUPERADMIN: gets from User table
-   * For STAFF: gets from User + BusinessUser tables
-   */
-  private async getCreatorInfo(
+  // ==================== Helper Methods ====================
+
+  private async getUserBusinessRoles(
+    userId: string,
+    businessId: string,
+  ): Promise<EBusinessRole[]> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) return [];
+    if (user.role === EUserRole.SUPERADMIN) {
+      return [
+        EBusinessRole.OWNER,
+        EBusinessRole.ACCOUNTANT,
+        EBusinessRole.RECEPTIONIST,
+        EBusinessRole.SECRETARIAT,
+      ];
+    }
+    const businessUser = await this.businessUserRepository.findOne({
+      where: { userId: userId, businessId: businessId },
+    });
+    return businessUser?.roles || [];
+  }
+
+  private async checkPermission(
+    userId: string,
+    businessId: string,
+    allowedRoles: EBusinessRole[],
+    actionDescription: string,
+  ): Promise<void> {
+    const userRoles = await this.getUserBusinessRoles(userId, businessId);
+    const hasPermission = allowedRoles.some((role) => userRoles.includes(role));
+    if (!hasPermission) {
+      throw new ForbiddenException(
+        `You don't have permission to ${actionDescription}. Required roles: ${allowedRoles.join(', ')}`,
+      );
+    }
+  }
+
+  private async getUserInfo(
     userId: string,
     businessId: string,
   ): Promise<{ name: string; role: string }> {
@@ -73,18 +147,15 @@ export class BillService {
       return { name: 'Unknown', role: 'unknown' };
     }
 
-    // SUPERADMIN
     if (user.role === EUserRole.SUPERADMIN) {
       return { name: user.fullNames || user.phone, role: 'SUPERADMIN' };
     }
 
-    // STAFF - get their business role
     const businessUser = await this.businessUserRepository.findOne({
       where: { userId: userId, businessId: businessId },
     });
 
     if (businessUser && businessUser.roles && businessUser.roles.length > 0) {
-      // Get the primary role (first one)
       const primaryRole = businessUser.roles[0];
       return {
         name: user.fullNames || user.phone,
@@ -95,60 +166,21 @@ export class BillService {
     return { name: user.fullNames || user.phone, role: 'STAFF' };
   }
 
-  /**
-   * Check if user has a specific business role
-   */
-  private async userHasRole(
-    userId: string,
-    businessId: string,
-    requiredRoles: EBusinessRole[],
-  ): Promise<boolean> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-
-    if (!user) return false;
-
-    // SUPERADMIN has all permissions
-    if (user.role === EUserRole.SUPERADMIN) {
-      return true;
-    }
-
-    // Check STAFF's business roles
-    const businessUser = await this.businessUserRepository.findOne({
-      where: { userId: userId, businessId: businessId },
-    });
-
-    if (!businessUser) return false;
-
-    return requiredRoles.some((role) => businessUser.roles.includes(role));
+  private calculateItemTotals(
+    unitPrice: number,
+    quantity: number,
+    isNotary: boolean,
+  ): {
+    subtotal: number;
+    vatAmount: number;
+    total: number;
+  } {
+    const subtotal = unitPrice * quantity;
+    const vatAmount = isNotary ? Math.round(subtotal * this.VAT_RATE) : 0;
+    const total = subtotal + vatAmount;
+    return { subtotal, vatAmount, total };
   }
 
-  /**
-   * Check if user has any of the allowed roles for an action
-   */
-  private async checkPermission(
-    userId: string,
-    businessId: string,
-    allowedRoles: EBusinessRole[],
-    actionDescription: string,
-  ): Promise<void> {
-    const hasPermission = await this.userHasRole(
-      userId,
-      businessId,
-      allowedRoles,
-    );
-    if (!hasPermission) {
-      throw new ForbiddenException(
-        `You don't have permission to ${actionDescription}. Required roles: ${allowedRoles.join(', ')}`,
-      );
-    }
-  }
-
-  /**
-   * Generate unique bill number
-   * Format: NOT-YYYY-XXXX or SEC-YYYY-XXXX
-   */
   private async generateBillNumber(
     businessId: string,
     billType: BillType,
@@ -175,32 +207,9 @@ export class BillService {
       const lastNumber = parseInt(lastBill.bill_number.split('-')[2]);
       sequence = lastNumber + 1;
     }
-
-    const paddedSequence = sequence.toString().padStart(4, '0');
-    return `${prefix}-${year}-${paddedSequence}`;
+    return `${prefix}-${year}-${sequence.toString().padStart(4, '0')}`;
   }
 
-  /**
-   * Calculate totals for a service item
-   */
-  private calculateItemTotals(
-    unitPrice: number,
-    quantity: number,
-    isNotary: boolean,
-  ): {
-    subtotal: number;
-    vatAmount: number;
-    total: number;
-  } {
-    const subtotal = unitPrice * quantity;
-    const vatAmount = isNotary ? Math.round(subtotal * this.VAT_RATE) : 0;
-    const total = subtotal + vatAmount;
-    return { subtotal, vatAmount, total };
-  }
-
-  /**
-   * Check if client has active notary bill
-   */
   private async hasActiveNotaryBill(
     clientId: string,
     businessId: string,
@@ -211,44 +220,138 @@ export class BillService {
       .where('bill.client_id = :clientId', { clientId })
       .andWhere('bill.business_id = :businessId', { businessId })
       .andWhere('bill.status IN (:...statuses)', {
-        statuses: [BillStatus.PENDING, BillStatus.PAID],
+        statuses: [
+          BillStatus.PENDING,
+          BillStatus.PARTIALLY_PAID,
+          BillStatus.PAID,
+        ],
       })
       .andWhere('bill.bill_type IN (:...types)', {
         types: [BillType.NOTARY, BillType.BOTH],
       });
-
-    if (excludeBillId) {
+    if (excludeBillId)
       query.andWhere('bill.id != :excludeBillId', { excludeBillId });
-    }
-
-    const existingBill = await query.getOne();
-    return !!existingBill;
+    return !!(await query.getOne());
   }
 
-  /**
-   * Create a new bill (Notary, Secretariat, or Both)
-   */
+  private createBillItem(
+    type: ItemType,
+    serviceId: string | null,
+    serviceName: string,
+    subServiceName: string | null,
+    quantity: number,
+    unitPrice: number,
+    subtotal: number,
+    vat: number,
+    total: number,
+    notes?: string,
+  ): BillItem {
+    const item = new BillItem();
+    item.item_type = type;
+    item.service_id = serviceId || '';
+    item.service_name = serviceName;
+    item.sub_service_name = subServiceName || '';
+    item.quantity = quantity;
+    item.unit_price = unitPrice;
+    item.subtotal = subtotal;
+    item.vat_amount = vat;
+    item.total = total;
+    item.notes = notes || '';
+    return item;
+  }
+
+  private async getBookTracker(
+    businessId: string,
+    bookType: BookType,
+  ): Promise<BookTracker> {
+    const tracker = (await this.dataSource
+      .getRepository('book_trackers')
+      .findOne({
+        where: { business_id: businessId, book_type: bookType },
+      })) as BookTracker | null;
+
+    if (!tracker) {
+      throw new NotFoundException(`Book tracker for ${bookType} not found`);
+    }
+    return tracker;
+  }
+
+  private async updateBookTracker(
+    businessId: string,
+    bookType: BookType,
+    volume: string | null,
+    number: number,
+  ): Promise<void> {
+    const tracker = await this.getBookTracker(businessId, bookType);
+    tracker.current_number = number;
+    if (volume) tracker.current_volume = volume;
+    if (bookType === BookType.LAND) tracker.records_in_current_volume += 1;
+    await this.dataSource.getRepository('book_trackers').save(tracker);
+  }
+
+  private incrementRoman(roman: string): string {
+    const romanMap: [number, string][] = [
+      [1000, 'M'],
+      [900, 'CM'],
+      [500, 'D'],
+      [400, 'CD'],
+      [100, 'C'],
+      [90, 'XC'],
+      [50, 'L'],
+      [40, 'XL'],
+      [10, 'X'],
+      [9, 'IX'],
+      [5, 'V'],
+      [4, 'IV'],
+      [1, 'I'],
+    ];
+    let num = 0;
+    for (let i = 0; i < roman.length; i++) {
+      const current = this.romanCharValue(roman[i]);
+      const next = this.romanCharValue(roman[i + 1]);
+      if (current < next) num -= current;
+      else num += current;
+    }
+    let result = '';
+    for (const [value, symbol] of romanMap) {
+      while (num >= value) {
+        result += symbol;
+        num -= value;
+      }
+    }
+    return result;
+  }
+
+  private romanCharValue(char: string): number {
+    const values: Record<string, number> = {
+      I: 1,
+      V: 5,
+      X: 10,
+      L: 50,
+      C: 100,
+      D: 500,
+      M: 1000,
+    };
+    return values[char] || 0;
+  }
+
+  // ==================== Bill CRUD ====================
+
   async createBill(
     userId: string,
     businessId: string,
-    isStaff: boolean,
-    userRoles: EBusinessRole,
     dto: CreateBillDto,
-  ): Promise<any> {
+  ): Promise<BillResponseDto> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      // 1. Verify client exists and get FULL client info
       const client = await this.clientRepository.findOne({
-        where: { id: dto.client_id, business_id: businessId },
+        where: { id: dto.client_id, business: { id: businessId } },
       });
-      if (!client) {
-        throw new NotFoundException('Client not found');
-      }
+      if (!client) throw new NotFoundException('Client not found');
 
-      // 2. Check permissions based on bill type
       if (
         dto.bill_type === BillType.NOTARY ||
         dto.bill_type === BillType.BOTH
@@ -260,7 +363,6 @@ export class BillService {
           'create notary bills',
         );
       }
-
       if (dto.bill_type === BillType.SECRETARIAT) {
         await this.checkPermission(
           userId,
@@ -274,7 +376,6 @@ export class BillService {
         );
       }
 
-      // 3. Check if client already has active notary bill (for notary bills only)
       if (
         dto.bill_type === BillType.NOTARY ||
         dto.bill_type === BillType.BOTH
@@ -290,140 +391,109 @@ export class BillService {
         }
       }
 
-      // 4. Verify business is active
       const business = await this.businessRepository.findOne({
         where: { id: businessId, isActive: true },
       });
-      if (!business) {
+      if (!business)
         throw new NotFoundException('Business not found or inactive');
-      }
 
-      // 5. Calculate totals
-      let notarySubtotal = 0;
-      let notaryVat = 0;
-      let notaryTotal = 0;
-      let secretariatSubtotal = 0;
-      let secretariatTotal = 0;
-
+      let notarySubtotal = 0,
+        notaryVat = 0,
+        notaryTotal = 0;
+      let secretariatSubtotal = 0,
+        secretariatTotal = 0;
       const itemsToSave: BillItem[] = [];
 
-      // Process notary items
-      if (dto.notary_items && dto.notary_items.length > 0) {
+      if (dto.notary_items?.length) {
         for (const itemDto of dto.notary_items) {
-          let unitPrice = itemDto.unit_price;
-          let serviceName = itemDto.service_name;
-          let subServiceName = itemDto.sub_service_name;
-
-          // Get price from NotaryService repository if service_id is provided
+          let { unit_price, service_name, sub_service_name } = itemDto;
           if (itemDto.service_id) {
             const catalogItem = await this.notaryServiceRepository.findOne({
               where: { id: itemDto.service_id, business_id: businessId },
             });
             if (catalogItem) {
-              unitPrice = catalogItem.base_price ?? unitPrice;
-              serviceName = catalogItem.service_name;
-              subServiceName = catalogItem.sub_service;
+              unit_price = catalogItem.base_price ?? unit_price;
+              service_name = catalogItem.service_name;
+              sub_service_name = catalogItem.sub_service;
             }
           }
-
           const { subtotal, vatAmount, total } = this.calculateItemTotals(
-            unitPrice,
+            unit_price,
             itemDto.quantity,
             true,
           );
-
           notarySubtotal += subtotal;
           notaryVat += vatAmount;
           notaryTotal += total;
-
-          const billItem = new BillItem();
-          billItem.item_type = ItemType.NOTARY;
-          billItem.service_id = itemDto.service_id || '';
-          billItem.service_name = serviceName;
-          billItem.sub_service_name = subServiceName;
-          billItem.quantity = itemDto.quantity;
-          billItem.unit_price = unitPrice;
-          billItem.subtotal = subtotal;
-          billItem.vat_amount = vatAmount;
-          billItem.total = total;
-          billItem.notes = itemDto.notes || '';
-
-          itemsToSave.push(billItem);
+          itemsToSave.push(
+            this.createBillItem(
+              ItemType.NOTARY,
+              itemDto.service_id || null,
+              service_name,
+              sub_service_name,
+              itemDto.quantity,
+              unit_price,
+              subtotal,
+              vatAmount,
+              total,
+              itemDto.notes,
+            ),
+          );
         }
       }
 
-      // Process secretariat items
-      if (dto.secretariat_items && dto.secretariat_items.length > 0) {
+      if (dto.secretariat_items?.length) {
         for (const itemDto of dto.secretariat_items) {
-          let unitPrice = itemDto.unit_price;
-          let serviceName = itemDto.service_name;
-
-          // Get price from SecretariatService repository if service_id is provided
+          let { unit_price, service_name } = itemDto;
           if (itemDto.service_id) {
             const catalogItem = await this.secretariatServiceRepository.findOne(
-              {
-                where: { id: itemDto.service_id, business_id: businessId },
-              },
+              { where: { id: itemDto.service_id, business_id: businessId } },
             );
-            if (catalogItem) {
-              unitPrice = catalogItem.base_price ?? unitPrice;
-              serviceName = catalogItem.service_name;
-            }
+            if (catalogItem) unit_price = catalogItem.base_price ?? unit_price;
           }
-
           const { subtotal, total } = this.calculateItemTotals(
-            unitPrice,
+            unit_price,
             itemDto.quantity,
             false,
           );
-
           secretariatSubtotal += subtotal;
           secretariatTotal += total;
-
-          const billItem = new BillItem();
-          billItem.item_type = ItemType.SECRETARIAT;
-          billItem.service_id = itemDto.service_id || '';
-          billItem.service_name = serviceName;
-          billItem.sub_service_name = '';
-          billItem.quantity = itemDto.quantity;
-          billItem.unit_price = unitPrice;
-          billItem.subtotal = subtotal;
-          billItem.vat_amount = 0;
-          billItem.total = total;
-          billItem.notes = itemDto.notes || '';
-
-          itemsToSave.push(billItem);
+          itemsToSave.push(
+            this.createBillItem(
+              ItemType.SECRETARIAT,
+              itemDto.service_id || null,
+              service_name,
+              null,
+              itemDto.quantity,
+              unit_price,
+              subtotal,
+              0,
+              total,
+              itemDto.notes,
+            ),
+          );
         }
       }
 
-      if (itemsToSave.length === 0) {
+      if (itemsToSave.length === 0)
         throw new BadRequestException('At least one service item is required');
-      }
 
-      // Determine actual bill type
       const hasNotary = notaryTotal > 0;
       const hasSecretariat = secretariatTotal > 0;
-      let actualBillType: BillType;
-      if (hasNotary && hasSecretariat) {
-        actualBillType = BillType.BOTH;
-      } else if (hasNotary) {
-        actualBillType = BillType.NOTARY;
-      } else {
-        actualBillType = BillType.SECRETARIAT;
-      }
-
-      // 6. Generate bill number
+      const actualBillType =
+        hasNotary && hasSecretariat
+          ? BillType.BOTH
+          : hasNotary
+            ? BillType.NOTARY
+            : BillType.SECRETARIAT;
       const billNumber = await this.generateBillNumber(
         businessId,
         actualBillType,
       );
 
-      // 7. Create bill with denormalized client data
       const bill = this.billRepository.create({
         bill_number: billNumber,
         bill_type: actualBillType,
-
-        // Client information (denormalized from client entity)
         client_id: client.id,
         client_full_name: client.full_name,
         client_id_number: client.id_number,
@@ -441,33 +511,27 @@ export class BillService {
         client_partner_name: client.partner_name,
         client_verification_status: client.verification_status,
         client_upi: client.upi,
-
-        // Business info
         business_id: businessId,
         created_by: userId,
         is_created_by_staff: true,
-
-        // Financial totals
         notary_subtotal: notarySubtotal,
         notary_vat: notaryVat,
         notary_total: notaryTotal,
         secretariat_subtotal: secretariatSubtotal,
         secretariat_total: secretariatTotal,
         grand_total: notaryTotal + secretariatTotal,
-
+        amount_paid: 0,
+        remaining_balance: notaryTotal + secretariatTotal,
         status: BillStatus.PENDING,
         notes: dto.notes,
       });
 
       await queryRunner.manager.save(bill);
-
       for (const item of itemsToSave) {
         item.bill_id = bill.id;
         await queryRunner.manager.save(item);
       }
-
       await queryRunner.commitTransaction();
-
       return this.getBillById(bill.id, businessId);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -477,230 +541,28 @@ export class BillService {
     }
   }
 
-  /**
-   * Record a payment for a bill
-   */
-  async recordPayment(
+  async getBillById(
     billId: string,
     businessId: string,
-    userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
-    dto: RecordPaymentDto,
-  ): Promise<any> {
-    // Check permission (only accountant or owner)
-    await this.checkPermission(
-      userId,
-      businessId,
-      [EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT],
-      'record payments',
-    );
-
+  ): Promise<BillResponseDto> {
     const bill = await this.billRepository.findOne({
       where: { id: billId, business_id: businessId },
     });
+    if (!bill) throw new NotFoundException('Bill not found');
 
-    if (!bill) {
-      throw new NotFoundException('Bill not found');
-    }
-
-    if (
-      bill.status !== BillStatus.PENDING &&
-      bill.status !== BillStatus.PARTIALLY_PAID
-    ) {
-      throw new BadRequestException('Cannot record payment for this bill');
-    }
-
-    // Get user info for denormalization
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-
-    // Create payment record
-    const payment = this.paymentRepository.create({
-      bill_id: billId,
-      bill_number: bill.bill_number,
-      client_name: bill.client_full_name,
-      amount: dto.amount,
-      method: dto.method,
-      reference: dto.reference,
-      status: PaymentStatus.COMPLETED,
-      processed_by: userId,
-      processed_by_name: user?.fullNames || user?.phone || 'Unknown',
-      processed_by_role: userRole,
-      notes: dto.notes,
-      processed_at: new Date(),
-    });
-
-    await this.paymentRepository.save(payment);
-
-    // Update bill payment amounts
-    const newAmountPaid = bill.amount_paid + dto.amount;
-    const newRemainingBalance = bill.grand_total - newAmountPaid;
-
-    bill.amount_paid = newAmountPaid;
-    bill.remaining_balance = newRemainingBalance;
-
-    // Update bill status based on payment
-    if (newRemainingBalance <= 0) {
-      bill.status = BillStatus.PAID;
-      bill.paid_at = new Date();
-      bill.paid_by = userId;
-      bill.paid_by_name = user?.fullNames || user?.phone || 'Unknown';
-    } else {
-      bill.status = BillStatus.PARTIALLY_PAID;
-    }
-
-    await this.billRepository.save(bill);
-
-    return {
-      payment,
-      bill: {
-        id: bill.id,
-        status: bill.status,
-        amount_paid: bill.amount_paid,
-        remaining_balance: bill.remaining_balance,
-      },
-    };
-  }
-
-  /**
-   * Get payment history for a bill
-   */
-  async getPaymentHistory(
-    billId: string,
-    businessId: string,
-  ): Promise<Payment[]> {
-    const bill = await this.billRepository.findOne({
-      where: { id: billId, business_id: businessId },
-    });
-
-    if (!bill) {
-      throw new NotFoundException('Bill not found');
-    }
-
-    return this.paymentRepository.find({
-      where: { bill_id: billId },
-      order: { processed_at: 'DESC' },
-    });
-  }
-
-  /**
-   * Process refund for a payment
-   */
-  async refundPayment(
-    paymentId: string,
-    businessId: string,
-    userId: string,
-    userRole: string,
-    userBusinessRoles: EBusinessRole[],
-    dto: RefundPaymentDto,
-  ): Promise<any> {
-    await this.checkPermission(
-      userId,
-      businessId,
-      [EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT],
-      'process refunds',
-    );
-
-    const payment = await this.paymentRepository.findOne({
-      where: { id: paymentId },
-      relations: ['bill'],
-    });
-
-    if (!payment) {
-      throw new NotFoundException('Payment not found');
-    }
-
-    if (payment.status === PaymentStatus.REFUNDED) {
-      throw new BadRequestException('Payment already refunded');
-    }
-
-    // Update payment status
-    payment.status = PaymentStatus.REFUNDED;
-    await this.paymentRepository.save(payment);
-
-    // Update bill (reduce amount_paid)
-    const bill = payment.bill;
-    const newAmountPaid = bill.amount_paid - payment.amount;
-    bill.amount_paid = newAmountPaid;
-    bill.remaining_balance = bill.grand_total - newAmountPaid;
-
-    if (newAmountPaid <= 0) {
-      bill.status = BillStatus.PENDING;
-    } else {
-      bill.status = BillStatus.PARTIALLY_PAID;
-    }
-
-    await this.billRepository.save(bill);
-
-    return {
-      message: 'Payment refunded successfully',
-      payment: { id: payment.id, status: payment.status },
-      bill: {
-        id: bill.id,
-        status: bill.status,
-        amount_paid: bill.amount_paid,
-        remaining_balance: bill.remaining_balance,
-      },
-    };
-  }
-
-  /**
-   * Get bill by ID with full details (uses denormalized client data)
-   */
-  async getBillById(billId: string, businessId: string): Promise<any> {
-    const bill = await this.billRepository.findOne({
-      where: { id: billId, business_id: businessId },
-      // No need to join client - data is denormalized in the bill!
-    });
-
-    if (!bill) {
-      throw new NotFoundException('Bill not found');
-    }
-
-    // Get bill items
     const items = await this.billItemRepository.find({
       where: { bill_id: bill.id },
     });
-
-    // Get creator info using your entity structure
-    const creatorInfo = await this.getCreatorInfo(bill.created_by, businessId);
-
-    // Separate items by type
-    const notaryItems = items
-      .filter((item) => item.item_type === ItemType.NOTARY)
-      .map((item) => ({
-        id: item.id,
-        item_type: item.item_type,
-        service_name: item.service_name,
-        sub_service_name: item.sub_service_name,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        subtotal: item.subtotal,
-        vat_amount: item.vat_amount,
-        total: item.total,
-        notes: item.notes,
-      }));
-
-    const secretariatItems = items
-      .filter((item) => item.item_type === ItemType.SECRETARIAT)
-      .map((item) => ({
-        id: item.id,
-        item_type: item.item_type,
-        service_name: item.service_name,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        subtotal: item.subtotal,
-        total: item.total,
-        notes: item.notes,
-      }));
+    const payments = await this.paymentRepository.find({
+      where: { bill_id: bill.id },
+      order: { processed_at: 'DESC' },
+    });
+    const creatorInfo = await this.getUserInfo(bill.created_by, businessId);
 
     return {
       id: bill.id,
       bill_number: bill.bill_number,
       bill_type: bill.bill_type,
-      // Client info directly from bill (no JOIN needed!)
       client: {
         id: bill.client_id,
         full_name: bill.client_full_name,
@@ -720,22 +582,49 @@ export class BillService {
         verification_status: bill.client_verification_status,
         upi: bill.client_upi,
       },
-      notary: {
-        subtotal: bill.notary_subtotal,
-        vat: bill.notary_vat,
-        total: bill.notary_total,
-        items: notaryItems,
-      },
-      secretariat: {
-        subtotal: bill.secretariat_subtotal,
-        total: bill.secretariat_total,
-        items: secretariatItems,
-      },
+      notary_subtotal: bill.notary_subtotal,
+      notary_vat: bill.notary_vat,
+      notary_total: bill.notary_total,
+      secretariat_subtotal: bill.secretariat_subtotal,
+      secretariat_total: bill.secretariat_total,
       grand_total: bill.grand_total,
+      amount_paid: bill.amount_paid,
+      remaining_balance: bill.remaining_balance,
       status: bill.status,
-      notes: bill.notes,
       rejection_reason: bill.rejection_reason,
       rejection_notes: bill.rejection_notes,
+      notary_items: items
+        .filter((i) => i.item_type === ItemType.NOTARY)
+        .map((i) => ({
+          id: i.id,
+          service_name: i.service_name,
+          sub_service_name: i.sub_service_name,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          subtotal: i.subtotal,
+          vat_amount: i.vat_amount,
+          total: i.total,
+          notes: i.notes,
+        })),
+      secretariat_items: items
+        .filter((i) => i.item_type === ItemType.SECRETARIAT)
+        .map((i) => ({
+          id: i.id,
+          service_name: i.service_name,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          subtotal: i.subtotal,
+          total: i.total,
+          notes: i.notes,
+        })),
+      payments: payments.map((p) => ({
+        id: p.id,
+        amount: p.amount,
+        method: p.method,
+        reference: p.reference,
+        processed_by_name: p.processed_by_name,
+        processed_at: p.processed_at,
+      })),
       created_by_name: creatorInfo.name,
       created_by_role: creatorInfo.role,
       created_at: bill.createdAt,
@@ -743,97 +632,58 @@ export class BillService {
     };
   }
 
-  /**
-   * Get bill by bill number
-   */
-  async getBillByNumber(billNumber: string, businessId: string): Promise<any> {
-    const bill = await this.billRepository.findOne({
-      where: { bill_number: billNumber, business_id: businessId },
-    });
-
-    if (!bill) {
-      throw new NotFoundException('Bill not found');
-    }
-
-    return this.getBillById(bill.id, businessId);
-  }
-
-  /**
-   * Get all bills for a business with filters
-   */
-  async getAllBills(
+  async getBills(
     businessId: string,
-    filters: {
-      status?: BillStatus;
-      bill_type?: BillType;
-      client_id?: string;
-      start_date?: string;
-      end_date?: string;
-      page?: number;
-      limit?: number;
-    },
-  ): Promise<any> {
+    filters: ReportFiltersDto,
+  ): Promise<PaginatedResponseDto> {
     const query = this.billRepository
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId });
 
-    if (filters.status) {
+    if (filters.status)
       query.andWhere('bill.status = :status', { status: filters.status });
-    }
-
-    if (filters.bill_type) {
+    if (filters.bill_type)
       query.andWhere('bill.bill_type = :billType', {
         billType: filters.bill_type,
       });
-    }
-
-    if (filters.client_id) {
+    if (filters.client_id)
       query.andWhere('bill.client_id = :clientId', {
         clientId: filters.client_id,
       });
-    }
-
-    if (filters.start_date) {
+    if (filters.client_name)
+      query.andWhere('bill.client_full_name ILIKE :clientName', {
+        clientName: `%${filters.client_name}%`,
+      });
+    if (filters.start_date)
       query.andWhere('bill.created_at >= :startDate', {
         startDate: filters.start_date,
       });
-    }
-
-    if (filters.end_date) {
+    if (filters.end_date)
       query.andWhere('bill.created_at <= :endDate', {
         endDate: filters.end_date,
       });
-    }
 
     const page = filters.page || 1;
-    const limit = filters.limit || 20;
-    const skip = (page - 1) * limit;
-
-    query.skip(skip).take(limit);
-    query.orderBy('bill.created_at', 'DESC');
-
-    const [data, total] = await query.getManyAndCount();
+    const limit = filters.limit || 50;
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('bill.created_at', 'DESC')
+      .getManyAndCount();
 
     const formattedData = await Promise.all(
       data.map(async (bill) => {
         const items = await this.billItemRepository.find({
           where: { bill_id: bill.id },
         });
-        const creatorInfo = await this.getCreatorInfo(
-          bill.created_by,
-          businessId,
-        );
-
         return {
           id: bill.id,
           bill_number: bill.bill_number,
           bill_type: bill.bill_type,
           client_name: bill.client_full_name,
-          client_id_number: bill.client_id_number,
-          client_phone: bill.client_phone,
           grand_total: bill.grand_total,
+          amount_paid: bill.amount_paid,
           status: bill.status,
-          created_by_name: creatorInfo.name,
           created_at: bill.createdAt,
           item_count: items.length,
         };
@@ -849,307 +699,333 @@ export class BillService {
     };
   }
 
-  /**
-   * Get pending bills (for accountant)
-   */
-  async getPendingBills(businessId: string): Promise<any> {
-    const bills = await this.billRepository
-      .createQueryBuilder('bill')
-      .where('bill.business_id = :businessId', { businessId })
-      .andWhere('bill.status = :status', { status: BillStatus.PENDING })
-      .orderBy('bill.created_at', 'ASC')
-      .getMany();
+  // ==================== Payment Processing ====================
 
-    return Promise.all(
-      bills.map(async (bill) => {
-        const items = await this.billItemRepository.find({
-          where: { bill_id: bill.id },
-        });
-        return {
-          id: bill.id,
-          bill_number: bill.bill_number,
-          bill_type: bill.bill_type,
-          client_name: bill.client_full_name,
-          client_phone: bill.client_phone,
-          grand_total: bill.grand_total,
-          created_at: bill.createdAt,
-          has_notary: items.some((i) => i.item_type === ItemType.NOTARY),
-          has_secretariat: items.some(
-            (i) => i.item_type === ItemType.SECRETARIAT,
-          ),
-        };
-      }),
-    );
-  }
-
-  /**
-   * Get paid bills awaiting service (for notary - only notary bills)
-   */
-  async getPaidUnservedBills(businessId: string): Promise<any> {
-    const bills = await this.billRepository
-      .createQueryBuilder('bill')
-      .where('bill.business_id = :businessId', { businessId })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID })
-      .andWhere('bill.bill_type IN (:...types)', {
-        types: [BillType.NOTARY, BillType.BOTH],
-      })
-      .orderBy('bill.updated_at', 'ASC')
-      .getMany();
-
-    return Promise.all(
-      bills.map(async (bill) => {
-        const items = await this.billItemRepository.find({
-          where: { bill_id: bill.id, item_type: ItemType.NOTARY },
-        });
-        return {
-          id: bill.id,
-          bill_number: bill.bill_number,
-          client: {
-            id: bill.client_id,
-            full_name: bill.client_full_name,
-            id_number: bill.client_id_number,
-            phone: bill.client_phone,
-          },
-          notary_items: items.map((item) => ({
-            service_name: item.service_name,
-            sub_service_name: item.sub_service_name,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total: item.total,
-          })),
-          notary_total: bill.notary_total,
-          created_at: bill.createdAt,
-          paid_at: bill.updatedAt,
-        };
-      }),
-    );
-  }
-
-  /**
-   * Add items to existing bill
-   */
-  async addItemsToBill(
-    billId: string,
-    businessId: string,
+  async recordPayment(
     userId: string,
-    userRoles: EBusinessRole,
-    notaryItems?: NotaryServiceItemDto[],
-    secretariatItems?: SecretariatServiceItemDto[],
-  ): Promise<any> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    businessId: string,
+    dto: RecordPaymentDto,
+  ): Promise<RecordPaymentResponseDto> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT],
+      'record payments',
+    );
 
-    try {
-      // 1. Get the existing bill
-      const bill = await this.billRepository.findOne({
-        where: { id: billId, business_id: businessId },
-      });
-
-      if (!bill) {
-        throw new NotFoundException('Bill not found');
-      }
-
-      if (bill.status !== BillStatus.PENDING) {
-        throw new BadRequestException(
-          'Cannot add items to a bill that is not pending',
-        );
-      }
-
-      // 2. Check permissions based on what we're adding
-      if (notaryItems && notaryItems.length > 0) {
-        await this.checkPermission(
-          userId,
-          businessId,
-          [EBusinessRole.OWNER, EBusinessRole.RECEPTIONIST],
-          'add notary items to bill',
-        );
-      }
-
-      if (secretariatItems && secretariatItems.length > 0) {
-        await this.checkPermission(
-          userId,
-          businessId,
-          [
-            EBusinessRole.OWNER,
-            EBusinessRole.RECEPTIONIST,
-            EBusinessRole.SECRETARIAT,
-          ],
-          'add secretariat items to bill',
-        );
-      }
-
-      // 3. Check if client already has active notary bill (for adding notary items)
-      if (notaryItems && notaryItems.length > 0) {
-        const hasActive = await this.hasActiveNotaryBill(
-          bill.client_id,
-          businessId,
-          billId,
-        );
-        if (hasActive) {
-          throw new ConflictException(
-            'Client already has a pending or paid notary bill. Only one notary service allowed at a time.',
-          );
-        }
-      }
-
-      let notarySubtotal = bill.notary_subtotal;
-      let notaryVat = bill.notary_vat;
-      let notaryTotal = bill.notary_total;
-      let secretariatSubtotal = bill.secretariat_subtotal;
-      let secretariatTotal = bill.secretariat_total;
-      const newItems: BillItem[] = [];
-
-      // 4. Process new notary items
-      if (notaryItems && notaryItems.length > 0) {
-        for (const itemDto of notaryItems) {
-          let unitPrice = itemDto.unit_price;
-          let serviceName = itemDto.service_name;
-          let subServiceName = itemDto.sub_service_name;
-
-          if (itemDto.service_id) {
-            const catalogItem = await this.notaryServiceRepository.findOne({
-              where: { id: itemDto.service_id, business_id: businessId },
-            });
-            if (catalogItem) {
-              unitPrice = catalogItem.base_price ?? unitPrice;
-              serviceName = catalogItem.service_name;
-              subServiceName = catalogItem.sub_service;
-            }
-          }
-
-          const { subtotal, vatAmount, total } = this.calculateItemTotals(
-            unitPrice,
-            itemDto.quantity,
-            true,
-          );
-
-          notarySubtotal += subtotal;
-          notaryVat += vatAmount;
-          notaryTotal += total;
-
-          const billItem = new BillItem();
-          billItem.item_type = ItemType.NOTARY;
-          billItem.service_id = itemDto.service_id || '';
-          billItem.service_name = serviceName;
-          billItem.sub_service_name = subServiceName || '';
-          billItem.quantity = itemDto.quantity;
-          billItem.unit_price = unitPrice;
-          billItem.subtotal = subtotal;
-          billItem.vat_amount = vatAmount;
-          billItem.total = total;
-          billItem.notes = itemDto.notes || '';
-
-          newItems.push(billItem);
-        }
-      }
-
-      // 5. Process new secretariat items
-      if (secretariatItems && secretariatItems.length > 0) {
-        for (const itemDto of secretariatItems) {
-          let unitPrice = itemDto.unit_price;
-          let serviceName = itemDto.service_name;
-
-          if (itemDto.service_id) {
-            const catalogItem = await this.secretariatServiceRepository.findOne(
-              {
-                where: { id: itemDto.service_id, business_id: businessId },
-              },
-            );
-            if (catalogItem) {
-              unitPrice = catalogItem.base_price ?? unitPrice;
-              serviceName = catalogItem.service_name;
-            }
-          }
-
-          const { subtotal, total } = this.calculateItemTotals(
-            unitPrice,
-            itemDto.quantity,
-            false,
-          );
-
-          secretariatSubtotal += subtotal;
-          secretariatTotal += total;
-
-          const billItem = new BillItem();
-          billItem.item_type = ItemType.SECRETARIAT;
-          billItem.service_id = itemDto.service_id || '';
-          billItem.service_name = serviceName;
-          billItem.sub_service_name = '';
-          billItem.quantity = itemDto.quantity;
-          billItem.unit_price = unitPrice;
-          billItem.subtotal = subtotal;
-          billItem.vat_amount = 0;
-          billItem.total = total;
-          billItem.notes = itemDto.notes || '';
-
-          newItems.push(billItem);
-        }
-      }
-
-      if (newItems.length === 0) {
-        throw new BadRequestException('At least one service item is required');
-      }
-
-      // 6. Update bill totals
-      bill.notary_subtotal = notarySubtotal;
-      bill.notary_vat = notaryVat;
-      bill.notary_total = notaryTotal;
-      bill.secretariat_subtotal = secretariatSubtotal;
-      bill.secretariat_total = secretariatTotal;
-      bill.grand_total = notaryTotal + secretariatTotal;
-
-      // 7. Update bill type if needed
-      if (
-        notaryTotal > 0 &&
-        secretariatTotal > 0 &&
-        bill.bill_type !== BillType.BOTH
-      ) {
-        bill.bill_type = BillType.BOTH;
-      } else if (notaryTotal > 0 && bill.bill_type === BillType.SECRETARIAT) {
-        bill.bill_type = BillType.BOTH;
-      } else if (secretariatTotal > 0 && bill.bill_type === BillType.NOTARY) {
-        bill.bill_type = BillType.BOTH;
-      }
-
-      await queryRunner.manager.save(bill);
-
-      // 8. Save new items
-      for (const item of newItems) {
-        item.bill_id = bill.id;
-        await queryRunner.manager.save(item);
-      }
-
-      await queryRunner.commitTransaction();
-
-      return this.getBillById(bill.id, businessId);
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
-    } finally {
-      await queryRunner.release();
+    const bill = await this.billRepository.findOne({
+      where: { id: dto.bill_id, business_id: businessId },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (
+      bill.status !== BillStatus.PENDING &&
+      bill.status !== BillStatus.PARTIALLY_PAID
+    ) {
+      throw new BadRequestException('Cannot record payment for this bill');
     }
+    if (dto.amount <= 0)
+      throw new BadRequestException('Payment amount must be greater than 0');
+    if (dto.amount > bill.remaining_balance) {
+      throw new BadRequestException(
+        `Payment amount exceeds remaining balance of ${bill.remaining_balance} RWF`,
+      );
+    }
+
+    const userInfo = await this.getUserInfo(userId, businessId);
+    const payment = this.paymentRepository.create({
+      bill_id: bill.id,
+      bill_number: bill.bill_number,
+      client_name: bill.client_full_name,
+      amount: dto.amount,
+      method: dto.method,
+      reference: dto.reference,
+      status: PaymentStatus.COMPLETED,
+      processed_by: userId,
+      processed_by_name: userInfo.name,
+      processed_by_role: userInfo.role,
+      notes: dto.notes,
+      processed_at: new Date(),
+    });
+    await this.paymentRepository.save(payment);
+
+    bill.amount_paid += dto.amount;
+    bill.remaining_balance = bill.grand_total - bill.amount_paid;
+    bill.status =
+      bill.remaining_balance <= 0 ? BillStatus.PAID : BillStatus.PARTIALLY_PAID;
+    if (bill.status === BillStatus.PAID) {
+      bill.paid_at = new Date();
+      bill.paid_by = userId;
+      bill.paid_by_name = userInfo.name;
+    }
+    await this.billRepository.save(bill);
+
+    return {
+      message: 'Payment recorded successfully',
+      payment: {
+        id: payment.id,
+        amount: payment.amount,
+        method: payment.method,
+      },
+      bill: {
+        id: bill.id,
+        status: bill.status,
+        amount_paid: bill.amount_paid,
+        remaining_balance: bill.remaining_balance,
+      },
+    };
   }
 
-  /**
-   * Update bill status
-   */
-  async updateBillStatus(
+  async getPaymentHistory(
     billId: string,
     businessId: string,
-    userId: string,
-    userRoles: EBusinessRole,
-    dto: UpdateBillStatusDto,
-  ): Promise<any> {
+  ): Promise<PaymentHistoryResponseDto> {
     const bill = await this.billRepository.findOne({
       where: { id: billId, business_id: businessId },
     });
+    if (!bill) throw new NotFoundException('Bill not found');
+    const payments = await this.paymentRepository.find({
+      where: { bill_id: billId },
+      order: { processed_at: 'DESC' },
+    });
+    return {
+      bill: {
+        id: bill.id,
+        bill_number: bill.bill_number,
+        grand_total: bill.grand_total,
+        amount_paid: bill.amount_paid,
+        remaining_balance: bill.remaining_balance,
+      },
+      payments,
+    };
+  }
 
-    if (!bill) {
-      throw new NotFoundException('Bill not found');
+  // ==================== Rejection & Refund ====================
+
+  async rejectBill(
+    userId: string,
+    businessId: string,
+    dto: RejectBillDto,
+  ): Promise<RejectBillResponseDto> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'reject bills',
+    );
+
+    const bill = await this.billRepository.findOne({
+      where: { id: dto.bill_id, business_id: businessId },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (
+      bill.status !== BillStatus.PAID &&
+      bill.status !== BillStatus.PENDING &&
+      bill.status !== BillStatus.PARTIALLY_PAID
+    ) {
+      throw new BadRequestException(
+        'Only pending or paid bills can be rejected',
+      );
     }
 
-    // Permission checks based on target status
+    const userInfo = await this.getUserInfo(userId, businessId);
+    bill.status = BillStatus.REJECTED;
+    bill.rejected_by = userId;
+    bill.rejected_at = new Date();
+    bill.rejection_reason = dto.reason;
+    bill.rejection_notes = dto.notes || '';
+    await this.billRepository.save(bill);
+
+    let refundAmount = 0;
+    if (dto.refund_type !== RefundType.NONE && bill.amount_paid > 0) {
+      switch (dto.refund_type) {
+        case RefundType.FULL:
+          refundAmount = bill.amount_paid;
+          break;
+        case RefundType.HALF:
+          refundAmount = Math.round(bill.amount_paid / 2);
+          break;
+        case RefundType.CUSTOM:
+          refundAmount = dto.custom_refund_amount || 0;
+          if (refundAmount > bill.amount_paid)
+            throw new BadRequestException(
+              'Custom refund amount exceeds paid amount',
+            );
+          break;
+      }
+      if (refundAmount > 0) {
+        const refund = this.refundRepository.create({
+          id: bill.id,
+          bill_number: bill.bill_number,
+          client_name: bill.client_full_name,
+          original_amount: bill.amount_paid,
+          refund_amount: refundAmount,
+          refund_reason: dto.reason,
+          refund_type: dto.refund_type,
+          processed_by: userId,
+          processed_by_name: userInfo.name,
+          processed_at: new Date(),
+        });
+        await this.refundRepository.save(refund);
+        bill.status = BillStatus.REFUNDED;
+        await this.billRepository.save(bill);
+      }
+    }
+
+    return {
+      message: 'Bill rejected successfully',
+      bill: {
+        id: bill.id,
+        status: bill.status,
+        refund_processed: refundAmount > 0,
+        refund_amount: refundAmount,
+      },
+    };
+  }
+
+  // ==================== Serve Bill (Create Notary Record) ====================
+
+  async serveBill(
+    userId: string,
+    businessId: string,
+    dto: ServeBillDto,
+  ): Promise<ServeBillResponseDto> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'serve bills',
+    );
+
+    const bill = await this.billRepository.findOne({
+      where: { id: dto.bill_id, business_id: businessId },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (bill.status !== BillStatus.PAID)
+      throw new BadRequestException('Only paid bills can be served');
+    if (bill.notary_total === 0)
+      throw new BadRequestException(
+        'This bill has no notary services to serve',
+      );
+
+    const notaryItems = await this.billItemRepository.find({
+      where: { bill_id: bill.id, item_type: ItemType.NOTARY },
+    });
+    if (notaryItems.length === 0)
+      throw new BadRequestException('No notary items found on this bill');
+
+    let volume = dto.volume;
+    let recordNumber = dto.record_number;
+    let displayNumber: string;
+
+    if (!recordNumber) {
+      const tracker = await this.getBookTracker(businessId, dto.book_type);
+      recordNumber = tracker.current_number + 1;
+      if (
+        dto.book_type === BookType.LAND &&
+        tracker.records_in_current_volume >= tracker.records_per_volume
+      ) {
+        volume = this.incrementRoman(tracker.current_volume || 'I');
+        recordNumber = 1;
+      } else {
+        volume = tracker.current_volume || '';
+      }
+      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
+      await this.updateBookTracker(
+        businessId,
+        dto.book_type,
+        volume,
+        recordNumber,
+      );
+    } else {
+      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
+    }
+
+    if (dto.book_type === BookType.LAND && !dto.upi && !bill.client_upi) {
+      throw new BadRequestException(
+        'UPI (Unique Parcel Identifier) is required for land records',
+      );
+    }
+
+    const firstItem = notaryItems[0];
+    const userInfo = await this.getUserInfo(userId, businessId);
+
+    const notaryRecord = this.notaryRecordRepository.create({
+      book_type: dto.book_type,
+      bill_id: bill.id,
+      client_id: bill.client_id,
+      business_id: businessId,
+      volume: volume || null,
+      record_number: recordNumber.toString(),
+      display_number: displayNumber,
+      service_category: firstItem.service_name,
+      sub_service: firstItem.sub_service_name,
+      amount: firstItem.subtotal,
+      vat_amount: firstItem.vat_amount,
+      upi: dto.upi || bill.client_upi,
+      notary_notes: dto.notary_notes,
+      served_by: userId,
+      served_date: new Date(),
+      client_full_name: bill.client_full_name,
+      client_id_number: bill.client_id_number,
+      client_phone: bill.client_phone,
+      client_father_name: bill.client_father_name,
+      client_mother_name: bill.client_mother_name,
+      client_province: bill.client_province,
+      client_district: bill.client_district,
+      client_sector: bill.client_sector,
+      client_cell: bill.client_cell,
+      client_village: bill.client_village,
+      client_verification_status: bill.client_verification_status,
+      status: RecordStatus.ACTIVE,
+    });
+    await this.notaryRecordRepository.save(notaryRecord);
+
+    bill.status = BillStatus.SERVED;
+    await this.billRepository.save(bill);
+
+    return {
+      message: 'Bill served successfully. Notary record created.',
+      notary_record: {
+        id: notaryRecord.id,
+        display_number: notaryRecord.display_number,
+        volume: notaryRecord.volume,
+        record_number: notaryRecord.record_number,
+        book_type: notaryRecord.book_type,
+        service: notaryRecord.sub_service,
+        amount: notaryRecord.amount + notaryRecord.vat_amount,
+        served_date: notaryRecord.served_date,
+      },
+      bill: { id: bill.id, status: bill.status },
+    };
+  }
+
+  // ==================== Bill Status Updates ====================
+
+  async updateBillStatus(
+    userId: string,
+    businessId: string,
+    dto: UpdateBillStatusDto,
+  ): Promise<BillResponseDto> {
+    const bill = await this.billRepository.findOne({
+      where: { id: dto.bill_id, business_id: businessId },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+
+    const validTransitions: Record<BillStatus, BillStatus[]> = {
+      [BillStatus.PENDING]: [BillStatus.PAID, BillStatus.CANCELLED],
+      [BillStatus.PARTIALLY_PAID]: [BillStatus.PAID, BillStatus.CANCELLED],
+      [BillStatus.PAID]: [BillStatus.SERVED, BillStatus.REJECTED],
+      [BillStatus.SERVED]: [],
+      [BillStatus.REJECTED]: [BillStatus.REFUNDED, BillStatus.SERVED],
+      [BillStatus.REFUNDED]: [],
+      [BillStatus.CANCELLED]: [],
+    };
+    if (!validTransitions[bill.status]?.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot transition from ${bill.status} to ${dto.status}`,
+      );
+    }
+
     if (dto.status === BillStatus.PAID) {
       await this.checkPermission(
         userId,
@@ -1157,9 +1033,7 @@ export class BillService {
         [EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT],
         'mark bills as paid',
       );
-    }
-
-    if (
+    } else if (
       dto.status === BillStatus.SERVED ||
       dto.status === BillStatus.REJECTED
     ) {
@@ -1169,9 +1043,7 @@ export class BillService {
         [EBusinessRole.OWNER],
         'serve or reject bills',
       );
-    }
-
-    if (dto.status === BillStatus.REFUNDED) {
+    } else if (dto.status === BillStatus.REFUNDED) {
       await this.checkPermission(
         userId,
         businessId,
@@ -1180,150 +1052,251 @@ export class BillService {
       );
     }
 
-    // Validate status transition
-    const validTransitions: Record<BillStatus, BillStatus[]> = {
-      [BillStatus.PENDING]: [BillStatus.PAID, BillStatus.CANCELLED],
-      [BillStatus.PAID]: [BillStatus.SERVED, BillStatus.REJECTED],
-      [BillStatus.SERVED]: [],
-      [BillStatus.REJECTED]: [BillStatus.REFUNDED],
-      [BillStatus.REFUNDED]: [],
-      [BillStatus.CANCELLED]: [],
-      [BillStatus.PARTIALLY_PAID]: [
-        BillStatus.PAID,
-        BillStatus.SERVED,
-        BillStatus.REJECTED,
-      ],
-    };
-
-    if (!validTransitions[bill.status].includes(dto.status)) {
-      throw new BadRequestException(
-        `Cannot transition from ${bill.status} to ${dto.status}`,
-      );
-    }
-
     bill.status = dto.status;
-
-    if (dto.status === BillStatus.REJECTED) {
-      bill.rejected_by = userId;
-      bill.rejected_at = new Date();
-      bill.rejection_reason = dto.rejection_reason || '';
-      bill.rejection_notes = dto.rejection_notes || '';
-    }
-
+    if (dto.reason) bill.rejection_reason = dto.reason;
+    if (dto.notes) bill.rejection_notes = dto.notes;
     await this.billRepository.save(bill);
-
-    return this.getBillById(billId, businessId);
+    return this.getBillById(bill.id, businessId);
   }
 
-  /**
-   * Get bill statistics for dashboard
-   */
-  async getBillStats(businessId: string, date?: string): Promise<any> {
-    const targetDate = date || new Date().toISOString().split('T')[0];
+  // ==================== Reports ====================
 
-    // Define interfaces for raw query results
-    interface StatsRawResult {
+  async getMinijustReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<MinijustReportDto> {
+    const query = this.notaryRecordRepository
+      .createQueryBuilder('record')
+      .where('record.business_id = :businessId', { businessId })
+      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
+
+    if (filters.start_date)
+      query.andWhere('record.served_date >= :startDate', {
+        startDate: filters.start_date,
+      });
+    if (filters.end_date)
+      query.andWhere('record.served_date <= :endDate', {
+        endDate: filters.end_date,
+      });
+    if (filters.book_type)
+      query.andWhere('record.book_type = :bookType', {
+        bookType: filters.book_type,
+      });
+    if (filters.client_id)
+      query.andWhere('record.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    if (filters.client_name)
+      query.andWhere('record.client_full_name ILIKE :clientName', {
+        clientName: `%${filters.client_name}%`,
+      });
+
+    const records = await query.orderBy('record.served_date', 'ASC').getMany();
+    const totalAmount = records.reduce(
+      (sum, r) => sum + r.amount + r.vat_amount,
+      0,
+    );
+
+    return {
+      period: {
+        start_date: filters.start_date || 'all',
+        end_date: filters.end_date || 'all',
+      },
+      records: records.map((r) => ({
+        date: r.served_date,
+        book_type: r.book_type,
+        volume: r.volume || '-',
+        number: r.display_number || r.record_number,
+        client_full_name: r.client_full_name,
+        client_id_number: r.client_id_number,
+        service_name: r.service_category,
+        sub_service_name: r.sub_service,
+        amount: r.amount + r.vat_amount,
+      })),
+      total_records: records.length,
+      total_amount: totalAmount,
+    };
+  }
+
+  async getFinancialReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+    type: 'notary' | 'secretariat' | 'combined',
+  ): Promise<FinancialReportDto> {
+    const billsQuery = this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status = :status', { status: BillStatus.PAID });
+
+    if (filters.start_date)
+      billsQuery.andWhere('bill.created_at >= :startDate', {
+        startDate: filters.start_date,
+      });
+    if (filters.end_date)
+      billsQuery.andWhere('bill.created_at <= :endDate', {
+        endDate: filters.end_date,
+      });
+
+    const bills = await billsQuery.getMany();
+    const refunds = await this.refundRepository.find({
+      where: { id: In(bills.map((b) => b.id)) },
+    });
+    const totalRefunds = refunds.reduce((sum, r) => sum + r.refund_amount, 0);
+
+    let totalNotary = 0,
+      totalSecretariat = 0,
+      totalVat = 0;
+    for (const bill of bills) {
+      totalNotary += bill.notary_total;
+      totalSecretariat += bill.secretariat_total;
+      totalVat += bill.notary_vat;
+    }
+
+    const summary = {
+      total_bills: bills.length,
+      total_notary_revenue: totalNotary,
+      total_secretariat_revenue: totalSecretariat,
+      total_vat_collected: totalVat,
+      total_refunds: totalRefunds,
+      net_revenue:
+        (type === 'notary'
+          ? totalNotary
+          : type === 'secretariat'
+            ? totalSecretariat
+            : totalNotary + totalSecretariat) - totalRefunds,
+    };
+
+    // Define interface for the expected return type
+    interface StatusBreakdownItem {
       status: BillStatus;
       count: string;
-      total_amount: string | null;
+      amount: string | null;
     }
 
-    interface TypeStatsRawResult {
-      bill_type: BillType;
-      total: string | null;
-    }
-
-    interface VatStatsRawResult {
-      vat: string | null;
-    }
-
-    const stats: StatsRawResult[] = await this.billRepository
+    // Remove the type assertion - TypeScript can infer this
+    const statusBreakdownRaw = await this.billRepository
       .createQueryBuilder('bill')
       .select('bill.status', 'status')
       .addSelect('COUNT(*)', 'count')
-      .addSelect('SUM(bill.grand_total)', 'total_amount')
+      .addSelect('SUM(bill.grand_total)', 'amount')
       .where('bill.business_id = :businessId', { businessId })
-      .andWhere('DATE(bill.created_at) = :targetDate', { targetDate })
       .groupBy('bill.status')
       .getRawMany();
 
-    const result = {
-      date: targetDate,
-      total: { count: 0, amount: 0 },
-      pending: { count: 0, amount: 0 },
-      paid: { count: 0, amount: 0 },
-      served: { count: 0, amount: 0 },
-      rejected: { count: 0, amount: 0 },
-      refunded: { count: 0, amount: 0 },
-      cancelled: { count: 0, amount: 0 },
-      notary_total: 0,
-      secretariat_total: 0,
-      vat_collected: 0,
-    };
+    const statusBreakdown: Record<string, { count: number; amount: number }> =
+      {};
+    for (const stat of statusBreakdownRaw as StatusBreakdownItem[]) {
+      statusBreakdown[stat.status] = {
+        count: parseInt(stat.count, 10),
+        amount: parseInt(stat.amount || '0', 10),
+      };
+    }
 
-    const typeStats: TypeStatsRawResult[] = await this.billRepository
-      .createQueryBuilder('bill')
-      .select('bill.bill_type', 'bill_type')
-      .addSelect('SUM(bill.grand_total)', 'total')
+    interface PaymentBreakdownItem {
+      method: PaymentMethod;
+      amount: string | null;
+      count: string;
+    }
+
+    const paymentBreakdownRaw = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.bill', 'bill')
+      .select('payment.method', 'method')
+      .addSelect('SUM(payment.amount)', 'amount')
+      .addSelect('COUNT(DISTINCT payment.bill_id)', 'count')
       .where('bill.business_id = :businessId', { businessId })
-      .andWhere('DATE(bill.created_at) = :targetDate', { targetDate })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID })
-      .groupBy('bill.bill_type')
+      .groupBy('payment.method')
       .getRawMany();
 
-    for (const stat of typeStats) {
-      const totalValue = parseInt(stat.total || '0', 10);
-      if (stat.bill_type === BillType.NOTARY) {
-        result.notary_total += totalValue;
-      } else if (stat.bill_type === BillType.SECRETARIAT) {
-        result.secretariat_total += totalValue;
-      } else if (stat.bill_type === BillType.BOTH) {
-        result.notary_total += totalValue;
-        result.secretariat_total += totalValue;
-      }
+    const paymentBreakdown: Record<string, { count: number; amount: number }> =
+      {};
+    for (const stat of paymentBreakdownRaw as PaymentBreakdownItem[]) {
+      paymentBreakdown[stat.method] = {
+        count: parseInt(stat.count, 10),
+        amount: parseInt(stat.amount || '0', 10),
+      };
     }
 
-    const vatStats = (await this.billRepository
+    return {
+      period: {
+        start_date: filters.start_date || 'all',
+        end_date: filters.end_date || 'all',
+      },
+      summary,
+      breakdown_by_status: statusBreakdown,
+      breakdown_by_payment_method: paymentBreakdown,
+    };
+  }
+
+  async getDailySalesReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<DailySalesReportDto> {
+    const query = this.billRepository
       .createQueryBuilder('bill')
-      .select('SUM(bill.notary_vat)', 'vat')
       .where('bill.business_id = :businessId', { businessId })
-      .andWhere('DATE(bill.created_at) = :targetDate', { targetDate })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID })
-      .getRawOne()) as VatStatsRawResult;
+      .andWhere('bill.status = :status', { status: BillStatus.PAID });
 
-    result.vat_collected = parseInt(vatStats?.vat || '0', 10);
+    if (filters.start_date)
+      query.andWhere('bill.created_at >= :startDate', {
+        startDate: filters.start_date,
+      });
+    if (filters.end_date)
+      query.andWhere('bill.created_at <= :endDate', {
+        endDate: filters.end_date,
+      });
 
-    for (const stat of stats) {
-      const count = parseInt(stat.count, 10);
-      const amount = parseInt(stat.total_amount || '0', 10);
+    const bills = await query.orderBy('bill.created_at', 'DESC').getMany();
+    const totalRevenue = bills.reduce((sum, b) => sum + b.grand_total, 0);
+    const totalVat = bills.reduce((sum, b) => sum + b.notary_vat, 0);
 
-      result.total.count += count;
-      result.total.amount += amount;
-
-      switch (stat.status) {
-        case BillStatus.PENDING:
-          result.pending = { count, amount };
-          break;
-        case BillStatus.PAID:
-          result.paid = { count, amount };
-          break;
-        case BillStatus.SERVED:
-          result.served = { count, amount };
-          break;
-        case BillStatus.REJECTED:
-          result.rejected = { count, amount };
-          break;
-        case BillStatus.REFUNDED:
-          result.refunded = { count, amount };
-          break;
-        case BillStatus.CANCELLED:
-          result.cancelled = { count, amount };
-          break;
-        default:
-          break;
-      }
+    interface PaymentBreakdownItem {
+      method: PaymentMethod;
+      amount: string | null;
+      count: string;
     }
 
-    return result;
+    const paymentBreakdownRaw = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.bill', 'bill')
+      .select('payment.method', 'method')
+      .addSelect('SUM(payment.amount)', 'amount')
+      .addSelect('COUNT(DISTINCT payment.bill_id)', 'count')
+      .where('bill.business_id = :businessId', { businessId })
+      .groupBy('payment.method')
+      .getRawMany();
+
+    const paymentMethodBreakdown: Record<
+      string,
+      { amount: number; count: number }
+    > = {};
+    for (const stat of paymentBreakdownRaw as PaymentBreakdownItem[]) {
+      paymentMethodBreakdown[stat.method] = {
+        count: parseInt(stat.count, 10),
+        amount: parseInt(stat.amount || '0', 10),
+      };
+    }
+
+    return {
+      period: {
+        start_date: filters.start_date || 'all',
+        end_date: filters.end_date || 'all',
+      },
+      summary: {
+        total_bills: bills.length,
+        total_revenue: totalRevenue,
+        total_vat: totalVat,
+        average_bill_value: bills.length ? totalRevenue / bills.length : 0,
+      },
+      payment_method_breakdown: paymentMethodBreakdown,
+      transactions: bills.map((b) => ({
+        id: b.id,
+        bill_number: b.bill_number,
+        client_name: b.client_full_name,
+        amount: b.grand_total,
+        vat: b.notary_vat,
+        date: b.createdAt,
+      })),
+    };
   }
 }

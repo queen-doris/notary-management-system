@@ -28,12 +28,12 @@ import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { EmployeeLeave } from './shared/entities/employee-leave.entity';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { NotaryModule } from './modules/notary/notary.module';
 import { BooksModule } from './modules/books/books.module';
 import { BillModule } from './modules/bill/bill.module';
 import { ClientModule } from './modules/client/client.module';
 import { SecretariatServiceModule } from './modules/secretariat-service/secretariat-service.module';
 import { NotaryServiceModule } from './modules/notary-service/notary-service.module';
+import { DocumentModule } from './modules/document/document.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -116,9 +116,9 @@ import { NotaryServiceModule } from './modules/notary-service/notary-service.mod
     ClientModule,
     BillModule,
     BooksModule,
-    NotaryModule,
     NotaryServiceModule,
     SecretariatServiceModule,
+    DocumentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

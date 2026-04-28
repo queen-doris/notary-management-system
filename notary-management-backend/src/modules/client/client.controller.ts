@@ -20,7 +20,7 @@ import { RolesGuard } from 'src/common/guards/roles.guard';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { EBusinessRole } from 'src/shared/enums/business-role.enum';
 import { AuthenticatedRequest } from 'src/shared/interfaces/request.interface';
-import { ApiBearerAuth } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 
 @Controller('clients')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -54,6 +54,20 @@ export class ClientController {
    * Search clients
    * Roles: everyone except accountant
    */
+  //   @Get('search')
+  //   @ApiBearerAuth('access-token')
+  //   @Roles(
+  //     EBusinessRole.RECEPTIONIST,
+  //     EBusinessRole.SECRETARIAT,
+  //     EBusinessRole.OWNER,
+  //   )
+  //   async searchClients(
+  //     @Req() req: AuthenticatedRequest,
+  //     @Query() searchDto: SearchClientDto,
+  //   ) {
+  //     return this.clientService.searchClients(req.user.businessId, searchDto);
+  //   }
+
   @Get('search')
   @ApiBearerAuth('access-token')
   @Roles(
@@ -61,6 +75,14 @@ export class ClientController {
     EBusinessRole.SECRETARIAT,
     EBusinessRole.OWNER,
   )
+  @ApiQuery({ name: 'q', required: false })
+  @ApiQuery({ name: 'id_number', required: false })
+  @ApiQuery({ name: 'phone', required: false })
+  @ApiQuery({ name: 'full_name', required: false })
+  @ApiQuery({ name: 'verification_status', required: false })
+  @ApiQuery({ name: 'is_active', required: false, type: Boolean })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 10 })
   async searchClients(
     @Req() req: AuthenticatedRequest,
     @Query() searchDto: SearchClientDto,
@@ -194,6 +216,24 @@ export class ClientController {
       req.user.businessId,
       req.user.role,
     );
+  }
+
+  /**
+   * Get client bill stats
+   * Roles: receptionist, secretariat, owner
+   */
+  @Get(':id/bill-stats')
+  @ApiBearerAuth('access-token')
+  @Roles(
+    EBusinessRole.RECEPTIONIST,
+    EBusinessRole.SECRETARIAT,
+    EBusinessRole.OWNER,
+  )
+  async getClientBillStats(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
+    return this.clientService.getClientBillStats(id, req.user.businessId);
   }
 
   /**

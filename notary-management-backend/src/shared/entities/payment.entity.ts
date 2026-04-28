@@ -8,8 +8,8 @@ import {
 import { Bill } from './bill.entity';
 import { User } from './user.entity';
 import { BaseEntity } from './base.entity';
-import { PaymentMethod } from '../enums/payment-method.enum';
-import { PaymentStatus } from '../enums/payment-status.enum';
+import { PaymentMethod } from '../enums/bill-status.enum';
+import { PaymentStatus } from '../enums/bill-status.enum';
 
 @Entity('payments')
 export class Payment extends BaseEntity {
@@ -55,6 +55,18 @@ export class Payment extends BaseEntity {
 
   @CreateDateColumn()
   processed_at: Date;
+
+  @Column({ type: 'integer', nullable: true })
+  refunded_amount: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  refunded_at: Date;
+
+  @Column({ type: 'uuid', nullable: true })
+  refunded_by: string;
+
+  @Column({ type: 'text', nullable: true })
+  refund_reason: string;
 
   // Relationships (optional, for deeper queries)
   @ManyToOne(() => Bill)
