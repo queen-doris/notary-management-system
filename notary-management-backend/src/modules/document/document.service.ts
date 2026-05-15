@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-enum-comparison */
 /* eslint-disable @typescript-eslint/require-await */
 import {
@@ -18,7 +19,7 @@ import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import {
   UploadDocumentDto,
   UpdateDocumentMetadataDto,
-} from './dto/upload-document.dto';
+} from './dto/upload-documents.dto';
 import { SearchDocumentDto } from './dto/search-document.dto';
 import {
   DocumentResponseDto,

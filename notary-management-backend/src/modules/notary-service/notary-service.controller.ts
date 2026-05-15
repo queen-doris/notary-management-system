@@ -24,7 +24,7 @@ import { ApiBearerAuth } from '@nestjs/swagger/dist/decorators/api-bearer.decora
 
 @Controller('notary-services')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
+@ApiBearerAuth('access-token')
 export class NotaryServiceController {
   constructor(private readonly notaryServiceService: NotaryServiceService) {}
 
@@ -100,7 +100,7 @@ export class NotaryServiceController {
   }
 
   @Delete('sub-service/:id')
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   async deleteSubService(
     @Req() req: AuthenticatedRequest,

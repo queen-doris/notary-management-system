@@ -6,6 +6,7 @@ import { BillItem } from './bill-item.entity';
 import { BillStatus, BillType } from '../enums/bill-status.enum';
 import { MaritalStatus, VerificationStatus } from '../enums/client.enum';
 import { BaseEntity } from './base.entity';
+import { RefundStatus } from '../enums/refund.enum';
 
 @Entity('bills')
 export class Bill extends BaseEntity {
@@ -162,4 +163,25 @@ export class Bill extends BaseEntity {
 
   @OneToMany(() => BillItem, (item) => item.bill, { cascade: true })
   items: BillItem[];
+
+  @Column({ type: 'enum', enum: RefundStatus, default: RefundStatus.NONE })
+  refund_status: RefundStatus;
+
+  @Column({ type: 'integer', default: 0 })
+  refund_requested_amount: number;
+
+  @Column({ type: 'integer', default: 0 })
+  amount_refunded: number;
+
+  @Column({ type: 'integer', default: 0 })
+  profit_after_refund: number;
+
+  @Column({ type: 'text', nullable: true })
+  refund_notes: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  refund_processed_by: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  refund_processed_at: Date;
 }

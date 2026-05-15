@@ -5,7 +5,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  IsBoolean,
   IsNumber,
   Min,
   Max,
@@ -22,7 +21,7 @@ export enum RejectionReason {
   OTHER = 'other',
 }
 
-export enum RefundType {
+export enum RefundOption {
   NONE = 'none',
   FULL = 'full',
   HALF = 'half',
@@ -44,18 +43,44 @@ export class RejectBillDto {
   notes?: string;
 
   @ApiProperty({
-    description: 'Type of refund to process',
-    enum: RefundType,
-    default: RefundType.NONE,
+    description: 'Refund option',
+    enum: RefundOption,
+    default: RefundOption.NONE,
   })
-  @IsEnum(RefundType)
-  refund_type: RefundType = RefundType.NONE;
+  @IsEnum(RefundOption)
+  refund_option: RefundOption = RefundOption.NONE;
 
   @ApiPropertyOptional({
-    description: 'Custom refund amount (only if refund_type is CUSTOM)',
+    description: 'Custom refund amount (only if refund_option is CUSTOM)',
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
   custom_refund_amount?: number;
+}
+
+export class ProcessRefundDto {
+  @ApiProperty({ description: 'Refund ID' })
+  @IsUUID()
+  refund_id: string;
+
+  @ApiProperty({ description: 'Actual amount to refund' })
+  @IsNumber()
+  @Min(0)
+  amount: number;
+
+  @ApiPropertyOptional({ description: 'Refund method (cash, bank, momo)' })
+  @IsOptional()
+  @IsString()
+  refund_method?: string;
+
+  @ApiPropertyOptional({ description: 'Transaction reference' })
+  @IsOptional()
+  @IsString()
+  transaction_reference?: string;
+
+  @ApiPropertyOptional({ description: 'Additional notes' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

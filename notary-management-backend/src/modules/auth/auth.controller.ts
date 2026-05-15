@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-return */
 import {
   Controller,
   Post,
@@ -50,7 +51,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Get('profile')
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -77,7 +78,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('select-business')
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Select active business for session' })
   @ApiResponse({ status: 200, description: 'Active business set' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -90,7 +91,7 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('change-password')
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Change password (requires current password)' })
   @ApiResponse({ status: 200, description: 'Password changed successfully' })
   @ApiResponse({

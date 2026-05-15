@@ -73,7 +73,7 @@ export class UserController {
 
   @Delete('me')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Delete current user account',
     description: 'Soft deletes the authenticated user account.',
@@ -185,7 +185,7 @@ export class UserController {
 
   @Patch('/complete-profile')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Complete profile',
   })

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
@@ -28,7 +29,6 @@ import { NotaryService } from '../../shared/entities/notary-service.entity';
 import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
 import { Payment } from '../../shared/entities/payment.entity';
-import { Refund } from '../../shared/entities/refund.entity';
 import {
   CreateBillDto,
   NotaryServiceItemDto,
@@ -36,11 +36,13 @@ import {
 } from './dto/create-bill.dto';
 import { UpdateBillStatusDto } from './dto/update-bill-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import { Refund } from '../../shared/entities/refund.entity';
 import {
-  RejectBillDto,
+  RefundRequestStatus,
   RefundType,
-  RejectionReason,
-} from './dto/reject-bill.dto';
+  RefundStatus,
+} from '../../shared/enums/refund.enum';
+import { RefundOption, RejectBillDto } from './dto/reject-bill.dto';
 import { ServeBillDto } from './dto/serve-bill.dto';
 import { ReportFiltersDto } from './dto/report-filters.dto';
 import {
@@ -53,6 +55,9 @@ import {
   RejectBillResponseDto,
   ServeBillResponseDto,
   DailySalesReportDto,
+  FinancialReportSummaryDto,
+  NotaryFinancialRecordDto,
+  SecretariatFinancialRecordDto,
 } from './dto/bill-response.dto';
 import {
   BillStatus,
@@ -66,6 +71,8 @@ import { EUserRole } from '../../shared/enums/user-role.enum';
 import { VerificationStatus } from '../../shared/enums/client.enum';
 import { RecordStatus } from '../../shared/enums/record-status.enum';
 import { BookTracker } from '../../shared/interfaces/book-tracker.interface';
+import { ProcessRefundDto } from './dto/process-refund.dto';
+import { AddItemsToBillDto } from './dto/add-items.dto';
 
 @Injectable()
 export class BillService {
@@ -559,6 +566,33 @@ export class BillService {
     });
     const creatorInfo = await this.getUserInfo(bill.created_by, businessId);
 
+    // Separate items by type
+    const notaryItems = items
+      .filter((i) => i.item_type === ItemType.NOTARY)
+      .map((i) => ({
+        id: i.id,
+        service_name: i.service_name,
+        sub_service_name: i.sub_service_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        subtotal: i.subtotal,
+        vat_amount: i.vat_amount,
+        total: i.total,
+        notes: i.notes,
+      }));
+
+    const secretariatItems = items
+      .filter((i) => i.item_type === ItemType.SECRETARIAT)
+      .map((i) => ({
+        id: i.id,
+        service_name: i.service_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        subtotal: i.subtotal,
+        total: i.total,
+        notes: i.notes,
+      }));
+
     return {
       id: bill.id,
       bill_number: bill.bill_number,
@@ -593,30 +627,8 @@ export class BillService {
       status: bill.status,
       rejection_reason: bill.rejection_reason,
       rejection_notes: bill.rejection_notes,
-      notary_items: items
-        .filter((i) => i.item_type === ItemType.NOTARY)
-        .map((i) => ({
-          id: i.id,
-          service_name: i.service_name,
-          sub_service_name: i.sub_service_name,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          subtotal: i.subtotal,
-          vat_amount: i.vat_amount,
-          total: i.total,
-          notes: i.notes,
-        })),
-      secretariat_items: items
-        .filter((i) => i.item_type === ItemType.SECRETARIAT)
-        .map((i) => ({
-          id: i.id,
-          service_name: i.service_name,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          subtotal: i.subtotal,
-          total: i.total,
-          notes: i.notes,
-        })),
+      notary_items: notaryItems,
+      secretariat_items: secretariatItems,
       payments: payments.map((p) => ({
         id: p.id,
         amount: p.amount,
@@ -655,11 +667,11 @@ export class BillService {
         clientName: `%${filters.client_name}%`,
       });
     if (filters.start_date)
-      query.andWhere('bill.created_at >= :startDate', {
+      query.andWhere('bill.createdAt >= :startDate', {
         startDate: filters.start_date,
       });
     if (filters.end_date)
-      query.andWhere('bill.created_at <= :endDate', {
+      query.andWhere('bill.createdAt <= :endDate', {
         endDate: filters.end_date,
       });
 
@@ -668,7 +680,7 @@ export class BillService {
     const [data, total] = await query
       .skip((page - 1) * limit)
       .take(limit)
-      .orderBy('bill.created_at', 'DESC')
+      .orderBy('bill.createdAt', 'DESC')
       .getManyAndCount();
 
     const formattedData = await Promise.all(
@@ -676,16 +688,26 @@ export class BillService {
         const items = await this.billItemRepository.find({
           where: { bill_id: bill.id },
         });
+        const notaryItems = items.filter(
+          (i) => i.item_type === ItemType.NOTARY,
+        );
+        const secretariatItems = items.filter(
+          (i) => i.item_type === ItemType.SECRETARIAT,
+        );
+
         return {
           id: bill.id,
           bill_number: bill.bill_number,
           bill_type: bill.bill_type,
           client_name: bill.client_full_name,
           grand_total: bill.grand_total,
+          notary_total: bill.notary_total,
+          secretariat_total: bill.secretariat_total,
           amount_paid: bill.amount_paid,
           status: bill.status,
           created_at: bill.createdAt,
-          item_count: items.length,
+          notary_item_count: notaryItems.length,
+          secretariat_item_count: secretariatItems.length,
         };
       }),
     );
@@ -698,7 +720,6 @@ export class BillService {
       totalPages: Math.ceil(total / limit),
     };
   }
-
   // ==================== Payment Processing ====================
 
   async recordPayment(
@@ -799,11 +820,179 @@ export class BillService {
     };
   }
 
+  // ==================== Add Items to Existing Bill ====================
+
+  async addItemsToBill(
+    userId: string,
+    businessId: string,
+    dto: AddItemsToBillDto,
+  ): Promise<BillResponseDto> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const bill = await this.billRepository.findOne({
+        where: { id: dto.bill_id, business_id: businessId },
+      });
+      if (!bill) throw new NotFoundException('Bill not found');
+
+      if (bill.status !== BillStatus.PENDING) {
+        throw new BadRequestException('Can only add items to pending bills');
+      }
+
+      // Check permissions based on what we're adding
+      if (dto.notary_items?.length) {
+        await this.checkPermission(
+          userId,
+          businessId,
+          [EBusinessRole.OWNER, EBusinessRole.RECEPTIONIST],
+          'add notary items to bill',
+        );
+      }
+      if (dto.secretariat_items?.length) {
+        await this.checkPermission(
+          userId,
+          businessId,
+          [
+            EBusinessRole.OWNER,
+            EBusinessRole.RECEPTIONIST,
+            EBusinessRole.SECRETARIAT,
+          ],
+          'add secretariat items to bill',
+        );
+      }
+
+      let notarySubtotal = bill.notary_subtotal;
+      let notaryVat = bill.notary_vat;
+      let notaryTotal = bill.notary_total;
+      let secretariatSubtotal = bill.secretariat_subtotal;
+      let secretariatTotal = bill.secretariat_total;
+      const newItems: BillItem[] = [];
+
+      // Process new notary items
+      if (dto.notary_items?.length) {
+        for (const itemDto of dto.notary_items) {
+          let { unit_price, service_name, sub_service_name } = itemDto;
+          if (itemDto.service_id) {
+            const catalogItem = await this.notaryServiceRepository.findOne({
+              where: { id: itemDto.service_id, business_id: businessId },
+            });
+            if (catalogItem) {
+              unit_price = catalogItem.base_price ?? unit_price;
+              service_name = catalogItem.service_name;
+              sub_service_name = catalogItem.sub_service;
+            }
+          }
+          const { subtotal, vatAmount, total } = this.calculateItemTotals(
+            unit_price,
+            itemDto.quantity,
+            true,
+          );
+          notarySubtotal += subtotal;
+          notaryVat += vatAmount;
+          notaryTotal += total;
+          newItems.push(
+            this.createBillItem(
+              ItemType.NOTARY,
+              itemDto.service_id || null,
+              service_name,
+              sub_service_name,
+              itemDto.quantity,
+              unit_price,
+              subtotal,
+              vatAmount,
+              total,
+              itemDto.notes,
+            ),
+          );
+        }
+      }
+
+      // Process new secretariat items
+      if (dto.secretariat_items?.length) {
+        for (const itemDto of dto.secretariat_items) {
+          let { unit_price, service_name } = itemDto;
+          if (itemDto.service_id) {
+            const catalogItem = await this.secretariatServiceRepository.findOne(
+              { where: { id: itemDto.service_id, business_id: businessId } },
+            );
+            if (catalogItem) unit_price = catalogItem.base_price ?? unit_price;
+          }
+          const { subtotal, total } = this.calculateItemTotals(
+            unit_price,
+            itemDto.quantity,
+            false,
+          );
+          secretariatSubtotal += subtotal;
+          secretariatTotal += total;
+          newItems.push(
+            this.createBillItem(
+              ItemType.SECRETARIAT,
+              itemDto.service_id || null,
+              service_name,
+              null,
+              itemDto.quantity,
+              unit_price,
+              subtotal,
+              0,
+              total,
+              itemDto.notes,
+            ),
+          );
+        }
+      }
+
+      if (newItems.length === 0) {
+        throw new BadRequestException('At least one service item is required');
+      }
+
+      // Update bill totals
+      bill.notary_subtotal = notarySubtotal;
+      bill.notary_vat = notaryVat;
+      bill.notary_total = notaryTotal;
+      bill.secretariat_subtotal = secretariatSubtotal;
+      bill.secretariat_total = secretariatTotal;
+      bill.grand_total = notaryTotal + secretariatTotal;
+      bill.remaining_balance = bill.grand_total - bill.amount_paid;
+
+      // Update bill type if needed
+      if (
+        notaryTotal > 0 &&
+        secretariatTotal > 0 &&
+        bill.bill_type !== BillType.BOTH
+      ) {
+        bill.bill_type = BillType.BOTH;
+      } else if (notaryTotal > 0 && bill.bill_type === BillType.SECRETARIAT) {
+        bill.bill_type = BillType.BOTH;
+      } else if (secretariatTotal > 0 && bill.bill_type === BillType.NOTARY) {
+        bill.bill_type = BillType.BOTH;
+      }
+
+      await queryRunner.manager.save(bill);
+
+      for (const item of newItems) {
+        item.bill_id = bill.id;
+        await queryRunner.manager.save(item);
+      }
+
+      await queryRunner.commitTransaction();
+      return this.getBillById(bill.id, businessId);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   // ==================== Rejection & Refund ====================
 
   async rejectBill(
     userId: string,
     businessId: string,
+    userRole: string,
+    userBusinessRoles: EBusinessRole[],
     dto: RejectBillDto,
   ): Promise<RejectBillResponseDto> {
     await this.checkPermission(
@@ -817,6 +1006,7 @@ export class BillService {
       where: { id: dto.bill_id, business_id: businessId },
     });
     if (!bill) throw new NotFoundException('Bill not found');
+
     if (
       bill.status !== BillStatus.PAID &&
       bill.status !== BillStatus.PENDING &&
@@ -828,56 +1018,310 @@ export class BillService {
     }
 
     const userInfo = await this.getUserInfo(userId, businessId);
+
+    // Update bill status to REJECTED
     bill.status = BillStatus.REJECTED;
     bill.rejected_by = userId;
     bill.rejected_at = new Date();
     bill.rejection_reason = dto.reason;
     bill.rejection_notes = dto.notes || '';
-    await this.billRepository.save(bill);
 
     let refundAmount = 0;
-    if (dto.refund_type !== RefundType.NONE && bill.amount_paid > 0) {
-      switch (dto.refund_type) {
-        case RefundType.FULL:
+    let refundRecord: Refund | null = null;
+
+    // Handle refund based on option
+    if (dto.refund_option !== RefundOption.NONE && bill.amount_paid > 0) {
+      switch (dto.refund_option) {
+        case RefundOption.FULL:
           refundAmount = bill.amount_paid;
           break;
-        case RefundType.HALF:
+        case RefundOption.HALF:
           refundAmount = Math.round(bill.amount_paid / 2);
           break;
-        case RefundType.CUSTOM:
+        case RefundOption.CUSTOM:
           refundAmount = dto.custom_refund_amount || 0;
-          if (refundAmount > bill.amount_paid)
+          if (refundAmount > bill.amount_paid) {
             throw new BadRequestException(
               'Custom refund amount exceeds paid amount',
             );
+          }
           break;
       }
+
       if (refundAmount > 0) {
-        const refund = this.refundRepository.create({
-          id: bill.id,
-          bill_number: bill.bill_number,
-          client_name: bill.client_full_name,
-          original_amount: bill.amount_paid,
-          refund_amount: refundAmount,
-          refund_reason: dto.reason,
-          refund_type: dto.refund_type,
-          processed_by: userId,
-          processed_by_name: userInfo.name,
-          processed_at: new Date(),
-        });
-        await this.refundRepository.save(refund);
-        bill.status = BillStatus.REFUNDED;
-        await this.billRepository.save(bill);
+        // Create refund record with PENDING status
+        const newRefund = new Refund();
+        newRefund.bill_id = bill.id;
+        newRefund.bill_number = bill.bill_number;
+        newRefund.client_name = bill.client_full_name;
+        newRefund.client_phone = bill.client_phone;
+        newRefund.original_amount_paid = bill.amount_paid;
+        newRefund.requested_amount = refundAmount;
+        newRefund.actual_refunded_amount = 0;
+        newRefund.refund_type =
+          dto.refund_option === RefundOption.FULL
+            ? RefundType.FULL
+            : dto.refund_option === RefundOption.HALF
+              ? RefundType.HALF
+              : RefundType.CUSTOM;
+        newRefund.reason = dto.reason;
+        newRefund.notes = dto.notes || '';
+        newRefund.status = RefundRequestStatus.PENDING;
+        newRefund.requested_by = userId;
+        newRefund.requested_by_name = userInfo.name;
+        newRefund.requested_at = new Date();
+
+        refundRecord = await this.refundRepository.save(newRefund);
+
+        // Update bill with refund pending status
+        bill.refund_status = RefundStatus.PENDING;
+        bill.refund_requested_amount = refundAmount;
+        bill.refund_notes = `Refund requested: ${refundAmount} RWF. Reason: ${dto.reason}`;
       }
     }
 
+    await this.billRepository.save(bill);
+
     return {
-      message: 'Bill rejected successfully',
+      message: refundRecord
+        ? 'Bill rejected. Refund request created.'
+        : 'Bill rejected successfully. No refund.',
       bill: {
         id: bill.id,
         status: bill.status,
+        refund_status: bill.refund_status || RefundStatus.NONE,
+        refund_requested_amount: bill.refund_requested_amount || 0,
         refund_processed: refundAmount > 0,
         refund_amount: refundAmount,
+      },
+      refund: refundRecord
+        ? {
+            id: refundRecord.id,
+            status: refundRecord.status,
+            requested_amount: refundRecord.requested_amount,
+          }
+        : null,
+    };
+  }
+
+  async processRefund(
+    userId: string,
+    businessId: string,
+    userRole: string,
+    userBusinessRoles: EBusinessRole[],
+    dto: ProcessRefundDto,
+  ): Promise<any> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT],
+      'process refunds',
+    );
+
+    const refund = await this.refundRepository.findOne({
+      where: { id: dto.refund_id },
+    });
+    if (!refund) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    if (refund.status !== RefundRequestStatus.PENDING) {
+      throw new BadRequestException(
+        `Cannot process refund in ${refund.status} status`,
+      );
+    }
+
+    const bill = await this.billRepository.findOne({
+      where: { id: refund.bill_id, business_id: businessId },
+    });
+    if (!bill) {
+      throw new NotFoundException('Bill not found');
+    }
+
+    const userInfo = await this.getUserInfo(userId, businessId);
+
+    // Validate refund amount
+    if (dto.amount > refund.requested_amount) {
+      throw new BadRequestException(
+        'Refund amount cannot exceed requested amount',
+      );
+    }
+
+    const businessUser = await this.businessUserRepository.findOne({
+      where: {
+        userId: userId,
+        businessId: businessId,
+      },
+    });
+
+    if (!businessUser) {
+      throw new NotFoundException('Business user not found');
+    }
+
+    // Update refund record
+    refund.actual_refunded_amount = dto.amount;
+    refund.refund_method = dto.refund_method || '';
+    refund.transaction_reference = dto.transaction_reference || '';
+    refund.notes = dto.notes || refund.notes;
+    refund.status = RefundRequestStatus.COMPLETED;
+    refund.approved_by = businessUser.id;
+    refund.approved_by_name = userInfo.name;
+    refund.approved_at = new Date();
+    refund.processed_by = businessUser.id;
+    refund.processed_by_name = userInfo.name;
+    refund.processed_at = new Date();
+
+    await this.refundRepository.save(refund);
+
+    // Update bill
+    bill.refund_status = RefundStatus.COMPLETED;
+    bill.amount_refunded = dto.amount;
+    bill.profit_after_refund = bill.amount_paid - dto.amount;
+    bill.refund_processed_by = businessUser.id;
+    bill.refund_processed_at = new Date();
+    bill.status = BillStatus.REFUNDED;
+
+    await this.billRepository.save(bill);
+
+    return {
+      message: 'Refund processed successfully',
+      refund: {
+        id: refund.id,
+        status: refund.status,
+        requested_amount: refund.requested_amount,
+        actual_refunded_amount: refund.actual_refunded_amount,
+        refund_method: refund.refund_method,
+        transaction_reference: refund.transaction_reference,
+        processed_at: refund.processed_at,
+      },
+      bill: {
+        id: bill.id,
+        status: bill.status,
+        refund_status: bill.refund_status,
+        amount_paid: bill.amount_paid,
+        amount_refunded: bill.amount_refunded,
+        profit_after_refund: bill.profit_after_refund,
+      },
+    };
+  }
+
+  async getPendingRefunds(
+    businessId: string,
+    userId: string,
+    userRole: string,
+    userBusinessRoles: EBusinessRole[],
+  ): Promise<Refund[]> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT],
+      'view pending refunds',
+    );
+
+    const pendingRefunds = await this.refundRepository
+      .createQueryBuilder('refund')
+      .innerJoin('refund.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('refund.status = :status', {
+        status: RefundRequestStatus.PENDING,
+      })
+      .orderBy('refund.requested_at', 'ASC')
+      .getMany();
+
+    return pendingRefunds;
+  }
+
+  async updateRefundRequest(
+    refundId: string,
+    businessId: string,
+    userId: string,
+    userRole: string,
+    userBusinessRoles: EBusinessRole[],
+    dto: Partial<Refund>,
+  ): Promise<Refund> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'update refund requests',
+    );
+
+    const refund = await this.refundRepository.findOne({
+      where: { id: refundId },
+      relations: ['bill'],
+    });
+    if (!refund) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    if (refund.bill?.business_id !== businessId) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (refund.status !== RefundRequestStatus.PENDING) {
+      throw new BadRequestException(
+        `Cannot update refund in ${refund.status} status`,
+      );
+    }
+
+    Object.assign(refund, dto);
+    await this.refundRepository.save(refund);
+
+    return refund;
+  }
+
+  async cancelRefundRequest(
+    refundId: string,
+    businessId: string,
+    userId: string,
+    userRole: string,
+    userBusinessRoles: EBusinessRole[],
+  ): Promise<any> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'cancel refund requests',
+    );
+
+    const refund = await this.refundRepository.findOne({
+      where: { id: refundId },
+      relations: ['bill'],
+    });
+    if (!refund) {
+      throw new NotFoundException('Refund request not found');
+    }
+
+    if (refund.bill?.business_id !== businessId) {
+      throw new ForbiddenException('Access denied');
+    }
+
+    if (refund.status !== RefundRequestStatus.PENDING) {
+      throw new BadRequestException(
+        `Cannot cancel refund in ${refund.status} status`,
+      );
+    }
+
+    refund.status = RefundRequestStatus.CANCELLED;
+    await this.refundRepository.save(refund);
+
+    const bill = refund.bill;
+    if (bill) {
+      bill.refund_status = RefundStatus.NONE;
+      bill.refund_requested_amount = 0;
+      bill.refund_notes = `Refund request cancelled: ${refund.reason}`;
+      await this.billRepository.save(bill);
+    }
+
+    return {
+      message: 'Refund request cancelled successfully',
+      refund: {
+        id: refund.id,
+        status: refund.status,
+      },
+      bill: {
+        id: bill?.id,
+        refund_status: bill?.refund_status,
       },
     };
   }
@@ -949,6 +1393,17 @@ export class BillService {
     const firstItem = notaryItems[0];
     const userInfo = await this.getUserInfo(userId, businessId);
 
+    const businessUser = await this.businessUserRepository.findOne({
+      where: {
+        userId: userId,
+        businessId: businessId,
+      },
+    });
+
+    if (!businessUser) {
+      throw new NotFoundException('Business user not found');
+    }
+
     const notaryRecord = this.notaryRecordRepository.create({
       book_type: dto.book_type,
       bill_id: bill.id,
@@ -963,10 +1418,13 @@ export class BillService {
       vat_amount: firstItem.vat_amount,
       upi: dto.upi || bill.client_upi,
       notary_notes: dto.notary_notes,
-      served_by: userId,
+      served_by: businessUser.id,
       served_date: new Date(),
       client_full_name: bill.client_full_name,
       client_id_number: bill.client_id_number,
+      client_email: bill.client_email,
+      client_marital_status: bill.client_marital_status,
+      client_partner_name: bill.client_partner_name,
       client_phone: bill.client_phone,
       client_father_name: bill.client_father_name,
       client_mother_name: bill.client_mother_name,
@@ -996,6 +1454,692 @@ export class BillService {
         served_date: notaryRecord.served_date,
       },
       bill: { id: bill.id, status: bill.status },
+    };
+  }
+
+  // ==================== Get Pending Bills by Type ====================
+
+  async getPendingNotaryBills(businessId: string): Promise<any[]> {
+    const bills = await this.billRepository
+      .createQueryBuilder('bill')
+      .leftJoinAndSelect('bill.items', 'items')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: [BillStatus.PAID],
+      })
+      .andWhere('bill.bill_type IN (:...types)', {
+        types: [BillType.NOTARY, BillType.BOTH],
+      })
+      .andWhere('items.item_type = :itemType', { itemType: ItemType.NOTARY })
+      .orderBy('bill.createdAt', 'ASC')
+      .getMany();
+
+    return bills.map((bill) => ({
+      id: bill.id,
+      bill_number: bill.bill_number,
+      client_name: bill.client_full_name,
+      client_phone: bill.client_phone,
+      notary_total: bill.notary_total,
+      created_at: bill.createdAt,
+    }));
+  }
+
+  async getPendingSecretariatBills(businessId: string): Promise<any[]> {
+    const bills = await this.billRepository
+      .createQueryBuilder('bill')
+      .leftJoinAndSelect('bill.items', 'items')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: [BillStatus.PAID],
+      })
+      .andWhere('bill.bill_type IN (:...types)', {
+        types: [BillType.SECRETARIAT, BillType.BOTH],
+      })
+      .andWhere('items.item_type = :itemType', {
+        itemType: ItemType.SECRETARIAT,
+      })
+      .orderBy('bill.createdAt', 'ASC')
+      .getMany();
+
+    return bills.map((bill) => ({
+      id: bill.id,
+      bill_number: bill.bill_number,
+      client_name: bill.client_full_name,
+      client_phone: bill.client_phone,
+      secretariat_total: bill.secretariat_total,
+      created_at: bill.createdAt,
+    }));
+  }
+
+  // ==================== Get Notary Records ====================
+
+  async getNotaryRecords(
+    UserId: string,
+    businessId: string,
+    filters: {
+      book_type?: BookType;
+      start_date?: string;
+      end_date?: string;
+      client_id?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<PaginatedResponseDto> {
+    await this.checkPermission(
+      UserId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'view records',
+    );
+    const query = this.notaryRecordRepository
+      .createQueryBuilder('record')
+      .where('record.business_id = :businessId', { id: businessId })
+      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
+
+    if (filters.book_type) {
+      query.andWhere('record.book_type = :bookType', {
+        bookType: filters.book_type,
+      });
+    }
+    if (filters.start_date) {
+      query.andWhere('record.served_date >= :startDate', {
+        startDate: filters.start_date,
+      });
+    }
+    if (filters.end_date) {
+      query.andWhere('record.served_date <= :endDate', {
+        endDate: filters.end_date,
+      });
+    }
+    if (filters.client_id) {
+      query.andWhere('record.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    }
+
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('record.served_date', 'DESC')
+      .getManyAndCount();
+
+    const formattedData = data.map((record) => ({
+      id: record.id,
+      record_number: record.display_number,
+      volume: record.volume,
+      book_type: record.book_type,
+      client_name: record.client_full_name,
+      client_id_number: record.client_id_number,
+      service_name: record.service_category,
+      sub_service_name: record.sub_service,
+      amount: record.amount,
+      vat_amount: record.vat_amount,
+      total: record.amount + record.vat_amount,
+      upi: record.upi,
+      served_date: record.served_date,
+      has_documents: record.has_documents,
+    }));
+
+    return {
+      data: formattedData,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async updateNotaryRecord(
+    recordId: string,
+    businessId: string,
+    userId: string,
+    userRole: string,
+    userBusinessRoles: EBusinessRole[],
+    dto: Partial<NotaryRecord>,
+  ): Promise<NotaryRecord> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'update notary records',
+    );
+
+    const record = await this.notaryRecordRepository.findOne({
+      where: { id: recordId, business_id: businessId },
+    });
+    if (!record) {
+      throw new NotFoundException('Notary record not found');
+    }
+
+    Object.assign(record, dto);
+    await this.notaryRecordRepository.save(record);
+
+    return record;
+  }
+
+  // ==================== Reports ====================
+
+  async getNotaryFinancialReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<{
+    summary: FinancialReportSummaryDto;
+    records: NotaryFinancialRecordDto[];
+  }> {
+    const query = this.billItemRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('item.item_type = :itemType', { itemType: ItemType.NOTARY })
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: [BillStatus.PAID, BillStatus.REFUNDED, BillStatus.SERVED],
+      });
+
+    if (filters.start_date) {
+      query.andWhere('bill.createdAt >= :startDate', {
+        startDate: filters.start_date,
+      });
+    }
+    if (filters.end_date) {
+      query.andWhere('bill.createdAt <= :endDate', {
+        endDate: filters.end_date,
+      });
+    }
+    if (filters.client_id) {
+      query.andWhere('bill.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    }
+    if (filters.client_name) {
+      query.andWhere('bill.client_full_name ILIKE :clientName', {
+        clientName: `%${filters.client_name}%`,
+      });
+    }
+
+    const items = await query.getMany();
+
+    const records: NotaryFinancialRecordDto[] = [];
+    let totalSubtotal = 0;
+    let totalVat = 0;
+    let totalGrand = 0;
+    let totalRefunded = 0;
+
+    for (const item of items) {
+      const bill = item.bill;
+      const isRefunded = bill.status === BillStatus.REFUNDED;
+      const amountRefunded = bill.amount_refunded || 0;
+
+      // Calculate refund amount proportionally for this item
+      const itemRatio = item.total / bill.grand_total;
+      const itemRefundedAmount = amountRefunded * itemRatio;
+      const amountAfterRefund = item.total - itemRefundedAmount;
+
+      totalSubtotal += item.subtotal;
+      totalVat += item.vat_amount;
+      totalGrand += item.total;
+      totalRefunded += itemRefundedAmount;
+
+      records.push({
+        date: bill.createdAt,
+        client_name: bill.client_full_name,
+        client_id_number: bill.client_id_number,
+        service_name: item.service_name,
+        sub_service_name: item.sub_service_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+        vat: item.vat_amount,
+        grand_total: item.total,
+        is_refunded: isRefunded,
+        amount_refunded: itemRefundedAmount,
+        amount_after_refund: amountAfterRefund,
+        bill_number: bill.bill_number,
+        bill_status: bill.status,
+      });
+    }
+
+    const summary: FinancialReportSummaryDto = {
+      total_bills: items.length,
+      total_notary_revenue: totalGrand,
+      total_secretariat_revenue: 0,
+      total_vat_collected: totalVat,
+      total_refunds: totalRefunded,
+      net_revenue: totalGrand - totalRefunded,
+    };
+
+    return { summary, records };
+  }
+
+  async getSecretariatFinancialReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<{
+    summary: FinancialReportSummaryDto;
+    records: SecretariatFinancialRecordDto[];
+  }> {
+    const query = this.billItemRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('item.item_type = :itemType', {
+        itemType: ItemType.SECRETARIAT,
+      })
+      .andWhere('bill.status = :status', { status: BillStatus.PAID });
+
+    if (filters.start_date) {
+      query.andWhere('bill.createdAt >= :startDate', {
+        startDate: filters.start_date,
+      });
+    }
+    if (filters.end_date) {
+      query.andWhere('bill.createdAt <= :endDate', {
+        endDate: filters.end_date,
+      });
+    }
+    if (filters.client_id) {
+      query.andWhere('bill.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    }
+    if (filters.client_name) {
+      query.andWhere('bill.client_full_name ILIKE :clientName', {
+        clientName: `%${filters.client_name}%`,
+      });
+    }
+
+    const items = await query.getMany();
+
+    const records: SecretariatFinancialRecordDto[] = [];
+    let totalSubtotal = 0;
+    let totalGrand = 0;
+
+    for (const item of items) {
+      const bill = item.bill;
+      totalSubtotal += item.subtotal;
+      totalGrand += item.total;
+
+      records.push({
+        date: bill.createdAt,
+        client_name: bill.client_full_name,
+        client_id_number: bill.client_id_number,
+        service_name: item.service_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.subtotal,
+        grand_total: item.total,
+        bill_number: bill.bill_number,
+        bill_status: bill.status,
+      });
+    }
+
+    const summary: FinancialReportSummaryDto = {
+      total_bills: items.length,
+      total_notary_revenue: 0,
+      total_secretariat_revenue: totalGrand,
+      total_vat_collected: 0,
+      total_refunds: 0,
+      net_revenue: totalGrand,
+    };
+
+    return { summary, records };
+  }
+
+  async getMinijustReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<MinijustReportDto> {
+    const query = this.notaryRecordRepository
+      .createQueryBuilder('record')
+      .where('record.business_id = :businessId', { businessId })
+      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
+
+    if (filters.start_date)
+      query.andWhere('record.served_date >= :startDate', {
+        startDate: filters.start_date,
+      });
+    if (filters.end_date)
+      query.andWhere('record.served_date <= :endDate', {
+        endDate: filters.end_date,
+      });
+    if (filters.book_type)
+      query.andWhere('record.book_type = :bookType', {
+        bookType: filters.book_type,
+      });
+    if (filters.client_id)
+      query.andWhere('record.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    if (filters.client_name)
+      query.andWhere('record.client_full_name ILIKE :clientName', {
+        clientName: `%${filters.client_name}%`,
+      });
+
+    const records = await query.orderBy('record.served_date', 'ASC').getMany();
+
+    return {
+      period: {
+        start_date: filters.start_date || 'all',
+        end_date: filters.end_date || 'all',
+      },
+      records: records.map((r) => ({
+        date: r.served_date,
+        book_type: r.book_type,
+        volume: r.volume || '-',
+        number: r.display_number || r.record_number,
+        client_full_name: r.client_full_name,
+        client_id_number: r.client_id_number,
+        service_name: r.service_category,
+        sub_service_name: r.sub_service,
+      })),
+      total_records: records.length,
+    };
+  }
+
+  async getFinancialReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+    bill_type: BillType,
+  ): Promise<FinancialReportDto> {
+    if (bill_type === BillType.NOTARY) {
+      const { summary, records } = await this.getNotaryFinancialReport(
+        businessId,
+        filters,
+      );
+      return {
+        period: {
+          start_date: filters.start_date || 'all',
+          end_date: filters.end_date || 'all',
+        },
+        type: BillType.NOTARY,
+        summary,
+        records: records,
+        breakdown_by_status: {},
+        breakdown_by_payment_method: {},
+      };
+    } else {
+      const { summary, records } = await this.getSecretariatFinancialReport(
+        businessId,
+        filters,
+      );
+      return {
+        period: {
+          start_date: filters.start_date || 'all',
+          end_date: filters.end_date || 'all',
+        },
+        type: BillType.SECRETARIAT,
+        summary,
+        records: records,
+        breakdown_by_status: {},
+        breakdown_by_payment_method: {},
+      };
+    }
+  }
+
+  async getDailySalesReport(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<DailySalesReportDto> {
+    const query = this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status = :status', { status: BillStatus.PAID });
+
+    if (filters.start_date)
+      query.andWhere('bill.createdAt >= :startDate', {
+        startDate: filters.start_date,
+      });
+    if (filters.end_date)
+      query.andWhere('bill.createdAt <= :endDate', {
+        endDate: filters.end_date,
+      });
+
+    const bills = await query.orderBy('bill.createdAt', 'DESC').getMany();
+
+    let totalNotaryRevenue = 0;
+    let totalSecretariatRevenue = 0;
+    let totalVat = 0;
+
+    for (const bill of bills) {
+      totalNotaryRevenue += bill.notary_total;
+      totalSecretariatRevenue += bill.secretariat_total;
+      totalVat += bill.notary_vat;
+    }
+
+    const totalRevenue = totalNotaryRevenue + totalSecretariatRevenue;
+
+    interface PaymentBreakdownRaw {
+      method: PaymentMethod;
+      amount: string | null;
+      count: string;
+    }
+
+    const paymentBreakdownRaw = (await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.bill', 'bill')
+      .select('payment.method', 'method')
+      .addSelect('SUM(payment.amount)', 'amount')
+      .addSelect('COUNT(DISTINCT payment.bill_id)', 'count')
+      .where('bill.business_id = :businessId', { businessId })
+      .groupBy('payment.method')
+      .getRawMany()) as PaymentBreakdownRaw[];
+
+    const paymentMethodBreakdown: Record<
+      string,
+      { amount: number; count: number }
+    > = {};
+    for (const stat of paymentBreakdownRaw) {
+      paymentMethodBreakdown[stat.method] = {
+        count: parseInt(stat.count, 10),
+        amount: parseInt(stat.amount || '0', 10),
+      };
+    }
+
+    return {
+      period: {
+        start_date: filters.start_date || 'all',
+        end_date: filters.end_date || 'all',
+      },
+      summary: {
+        total_bills: bills.length,
+        total_revenue: totalRevenue,
+        total_notary_revenue: totalNotaryRevenue,
+        total_secretariat_revenue: totalSecretariatRevenue,
+        total_vat: totalVat,
+        average_bill_value: bills.length ? totalRevenue / bills.length : 0,
+      },
+      payment_method_breakdown: paymentMethodBreakdown,
+      transactions: bills.map((b) => ({
+        id: b.id,
+        bill_number: b.bill_number,
+        client_name: b.client_full_name,
+        notary_amount: b.notary_total,
+        secretariat_amount: b.secretariat_total,
+        total: b.grand_total,
+        vat: b.notary_vat,
+        date: b.createdAt,
+      })),
+    };
+  }
+
+  // ==================== Dashboard Statistics ====================
+
+  async getDashboardStatistics(businessId: string): Promise<any> {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+
+    // Today's stats
+    const todayBills = await this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.createdAt >= :today', { today })
+      .getMany();
+
+    const todayPayments = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('payment.processed_at >= :today', { today })
+      .getMany();
+
+    // Pending counts
+    const pendingNotaryCount = await this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status = :status', { status: BillStatus.PAID })
+      .andWhere('bill.bill_type IN (:...types)', {
+        types: [BillType.NOTARY, BillType.BOTH],
+      })
+      .getCount();
+
+    const pendingSecretariatCount = await this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status = :status', { status: BillStatus.PAID })
+      .andWhere('bill.bill_type IN (:...types)', {
+        types: [BillType.SECRETARIAT, BillType.BOTH],
+      })
+      .getCount();
+
+    const pendingRefundsCount = await this.refundRepository
+      .createQueryBuilder('refund')
+      .innerJoin('refund.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('refund.status = :status', {
+        status: RefundRequestStatus.PENDING,
+      })
+      .getCount();
+
+    // Monthly revenue
+    const monthlyBills = await this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: [BillStatus.PAID, BillStatus.REFUNDED],
+      })
+      .andWhere('bill.createdAt >= :startOfMonth', { startOfMonth })
+      .getMany();
+
+    let monthlyRevenue = 0;
+    for (const bill of monthlyBills) {
+      monthlyRevenue +=
+        bill.status === BillStatus.REFUNDED
+          ? bill.profit_after_refund || 0
+          : bill.amount_paid;
+    }
+
+    return {
+      today: {
+        bills_created: todayBills.length,
+        revenue: todayPayments.reduce((sum, p) => sum + p.amount, 0),
+        payments_count: todayPayments.length,
+      },
+      pending: {
+        notary_bills: pendingNotaryCount,
+        secretariat_bills: pendingSecretariatCount,
+        refund_requests: pendingRefundsCount,
+      },
+      monthly: {
+        revenue: monthlyRevenue,
+        bills_count: monthlyBills.length,
+        start_date: startOfMonth,
+      },
+    };
+  }
+
+  async getAllRefunds(
+    businessId: string,
+    filters: {
+      status?: RefundRequestStatus;
+      start_date?: string;
+      end_date?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<PaginatedResponseDto> {
+    const query = this.refundRepository
+      .createQueryBuilder('refund')
+      .innerJoin('refund.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId });
+
+    if (filters.status) {
+      query.andWhere('refund.status = :status', { status: filters.status });
+    }
+    if (filters.start_date) {
+      query.andWhere('refund.requested_at >= :startDate', {
+        startDate: filters.start_date,
+      });
+    }
+    if (filters.end_date) {
+      query.andWhere('refund.requested_at <= :endDate', {
+        endDate: filters.end_date,
+      });
+    }
+
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('refund.requested_at', 'DESC')
+      .getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
+  async getAllPayments(
+    businessId: string,
+    filters: {
+      method?: PaymentMethod;
+      start_date?: string;
+      end_date?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<PaginatedResponseDto> {
+    const query = this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId });
+
+    if (filters.method) {
+      query.andWhere('payment.method = :method', { method: filters.method });
+    }
+    if (filters.start_date) {
+      query.andWhere('payment.processed_at >= :startDate', {
+        startDate: filters.start_date,
+      });
+    }
+    if (filters.end_date) {
+      query.andWhere('payment.processed_at <= :endDate', {
+        endDate: filters.end_date,
+      });
+    }
+
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('payment.processed_at', 'DESC')
+      .getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     };
   }
 
@@ -1057,246 +2201,5 @@ export class BillService {
     if (dto.notes) bill.rejection_notes = dto.notes;
     await this.billRepository.save(bill);
     return this.getBillById(bill.id, businessId);
-  }
-
-  // ==================== Reports ====================
-
-  async getMinijustReport(
-    businessId: string,
-    filters: ReportFiltersDto,
-  ): Promise<MinijustReportDto> {
-    const query = this.notaryRecordRepository
-      .createQueryBuilder('record')
-      .where('record.business_id = :businessId', { businessId })
-      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
-
-    if (filters.start_date)
-      query.andWhere('record.served_date >= :startDate', {
-        startDate: filters.start_date,
-      });
-    if (filters.end_date)
-      query.andWhere('record.served_date <= :endDate', {
-        endDate: filters.end_date,
-      });
-    if (filters.book_type)
-      query.andWhere('record.book_type = :bookType', {
-        bookType: filters.book_type,
-      });
-    if (filters.client_id)
-      query.andWhere('record.client_id = :clientId', {
-        clientId: filters.client_id,
-      });
-    if (filters.client_name)
-      query.andWhere('record.client_full_name ILIKE :clientName', {
-        clientName: `%${filters.client_name}%`,
-      });
-
-    const records = await query.orderBy('record.served_date', 'ASC').getMany();
-    const totalAmount = records.reduce(
-      (sum, r) => sum + r.amount + r.vat_amount,
-      0,
-    );
-
-    return {
-      period: {
-        start_date: filters.start_date || 'all',
-        end_date: filters.end_date || 'all',
-      },
-      records: records.map((r) => ({
-        date: r.served_date,
-        book_type: r.book_type,
-        volume: r.volume || '-',
-        number: r.display_number || r.record_number,
-        client_full_name: r.client_full_name,
-        client_id_number: r.client_id_number,
-        service_name: r.service_category,
-        sub_service_name: r.sub_service,
-        amount: r.amount + r.vat_amount,
-      })),
-      total_records: records.length,
-      total_amount: totalAmount,
-    };
-  }
-
-  async getFinancialReport(
-    businessId: string,
-    filters: ReportFiltersDto,
-    type: 'notary' | 'secretariat' | 'combined',
-  ): Promise<FinancialReportDto> {
-    const billsQuery = this.billRepository
-      .createQueryBuilder('bill')
-      .where('bill.business_id = :businessId', { businessId })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID });
-
-    if (filters.start_date)
-      billsQuery.andWhere('bill.created_at >= :startDate', {
-        startDate: filters.start_date,
-      });
-    if (filters.end_date)
-      billsQuery.andWhere('bill.created_at <= :endDate', {
-        endDate: filters.end_date,
-      });
-
-    const bills = await billsQuery.getMany();
-    const refunds = await this.refundRepository.find({
-      where: { id: In(bills.map((b) => b.id)) },
-    });
-    const totalRefunds = refunds.reduce((sum, r) => sum + r.refund_amount, 0);
-
-    let totalNotary = 0,
-      totalSecretariat = 0,
-      totalVat = 0;
-    for (const bill of bills) {
-      totalNotary += bill.notary_total;
-      totalSecretariat += bill.secretariat_total;
-      totalVat += bill.notary_vat;
-    }
-
-    const summary = {
-      total_bills: bills.length,
-      total_notary_revenue: totalNotary,
-      total_secretariat_revenue: totalSecretariat,
-      total_vat_collected: totalVat,
-      total_refunds: totalRefunds,
-      net_revenue:
-        (type === 'notary'
-          ? totalNotary
-          : type === 'secretariat'
-            ? totalSecretariat
-            : totalNotary + totalSecretariat) - totalRefunds,
-    };
-
-    // Define interface for the expected return type
-    interface StatusBreakdownItem {
-      status: BillStatus;
-      count: string;
-      amount: string | null;
-    }
-
-    // Remove the type assertion - TypeScript can infer this
-    const statusBreakdownRaw = await this.billRepository
-      .createQueryBuilder('bill')
-      .select('bill.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .addSelect('SUM(bill.grand_total)', 'amount')
-      .where('bill.business_id = :businessId', { businessId })
-      .groupBy('bill.status')
-      .getRawMany();
-
-    const statusBreakdown: Record<string, { count: number; amount: number }> =
-      {};
-    for (const stat of statusBreakdownRaw as StatusBreakdownItem[]) {
-      statusBreakdown[stat.status] = {
-        count: parseInt(stat.count, 10),
-        amount: parseInt(stat.amount || '0', 10),
-      };
-    }
-
-    interface PaymentBreakdownItem {
-      method: PaymentMethod;
-      amount: string | null;
-      count: string;
-    }
-
-    const paymentBreakdownRaw = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .innerJoin('payment.bill', 'bill')
-      .select('payment.method', 'method')
-      .addSelect('SUM(payment.amount)', 'amount')
-      .addSelect('COUNT(DISTINCT payment.bill_id)', 'count')
-      .where('bill.business_id = :businessId', { businessId })
-      .groupBy('payment.method')
-      .getRawMany();
-
-    const paymentBreakdown: Record<string, { count: number; amount: number }> =
-      {};
-    for (const stat of paymentBreakdownRaw as PaymentBreakdownItem[]) {
-      paymentBreakdown[stat.method] = {
-        count: parseInt(stat.count, 10),
-        amount: parseInt(stat.amount || '0', 10),
-      };
-    }
-
-    return {
-      period: {
-        start_date: filters.start_date || 'all',
-        end_date: filters.end_date || 'all',
-      },
-      summary,
-      breakdown_by_status: statusBreakdown,
-      breakdown_by_payment_method: paymentBreakdown,
-    };
-  }
-
-  async getDailySalesReport(
-    businessId: string,
-    filters: ReportFiltersDto,
-  ): Promise<DailySalesReportDto> {
-    const query = this.billRepository
-      .createQueryBuilder('bill')
-      .where('bill.business_id = :businessId', { businessId })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID });
-
-    if (filters.start_date)
-      query.andWhere('bill.created_at >= :startDate', {
-        startDate: filters.start_date,
-      });
-    if (filters.end_date)
-      query.andWhere('bill.created_at <= :endDate', {
-        endDate: filters.end_date,
-      });
-
-    const bills = await query.orderBy('bill.created_at', 'DESC').getMany();
-    const totalRevenue = bills.reduce((sum, b) => sum + b.grand_total, 0);
-    const totalVat = bills.reduce((sum, b) => sum + b.notary_vat, 0);
-
-    interface PaymentBreakdownItem {
-      method: PaymentMethod;
-      amount: string | null;
-      count: string;
-    }
-
-    const paymentBreakdownRaw = await this.paymentRepository
-      .createQueryBuilder('payment')
-      .innerJoin('payment.bill', 'bill')
-      .select('payment.method', 'method')
-      .addSelect('SUM(payment.amount)', 'amount')
-      .addSelect('COUNT(DISTINCT payment.bill_id)', 'count')
-      .where('bill.business_id = :businessId', { businessId })
-      .groupBy('payment.method')
-      .getRawMany();
-
-    const paymentMethodBreakdown: Record<
-      string,
-      { amount: number; count: number }
-    > = {};
-    for (const stat of paymentBreakdownRaw as PaymentBreakdownItem[]) {
-      paymentMethodBreakdown[stat.method] = {
-        count: parseInt(stat.count, 10),
-        amount: parseInt(stat.amount || '0', 10),
-      };
-    }
-
-    return {
-      period: {
-        start_date: filters.start_date || 'all',
-        end_date: filters.end_date || 'all',
-      },
-      summary: {
-        total_bills: bills.length,
-        total_revenue: totalRevenue,
-        total_vat: totalVat,
-        average_bill_value: bills.length ? totalRevenue / bills.length : 0,
-      },
-      payment_method_breakdown: paymentMethodBreakdown,
-      transactions: bills.map((b) => ({
-        id: b.id,
-        bill_number: b.bill_number,
-        client_name: b.client_full_name,
-        amount: b.grand_total,
-        vat: b.notary_vat,
-        date: b.createdAt,
-      })),
-    };
   }
 }

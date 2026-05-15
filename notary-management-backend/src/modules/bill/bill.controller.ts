@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Controller,
   Get,
@@ -8,6 +9,8 @@ import {
   UseGuards,
   ParseUUIDPipe,
   Patch,
+  Delete,
+  Put,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -43,11 +46,21 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { EBusinessRole } from '../../shared/enums/business-role.enum';
 import { BillStatus, BillType } from '../../shared/enums/bill-status.enum';
 import { AuthenticatedUser } from '../../shared/interfaces/authenticated-user.interface';
+import { ProcessRefundDto } from './dto/process-refund.dto';
+import { RejectBillResponseDto } from './dto/bill-response.dto';
+import { AddItemsToBillDto } from './dto/add-items.dto';
+import {
+  NotaryFinancialRecordDto,
+  SecretariatFinancialRecordDto,
+} from './dto/bill-response.dto';
+import { BookType } from '../../shared/enums/book-type.enum';
+import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { Refund } from '../../shared/entities/refund.entity';
 
 @ApiTags('Bills')
 @Controller('bills')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
+@ApiBearerAuth('access-token')
 export class BillController {
   constructor(private readonly billService: BillService) {}
 
@@ -60,11 +73,82 @@ export class BillController {
     EBusinessRole.SECRETARIAT,
   )
   @ApiOperation({
-    summary: 'Create a new bill',
-    description:
-      'Creates a bill for a client with notary and/or secretariat services. VAT is auto-calculated for notary services.',
+    summary: 'Create a new bill (Easy Swagger)',
+    description: `
+Create a bill for a client.
+
+✔ Use NOTARY → only notary_items  
+✔ Use SECRETARIAT → only secretariat_items  
+✔ Use BOTH → include both arrays  
+
+VAT is automatically calculated for NOTARY items.
+  `,
   })
-  @ApiBody({ type: CreateBillDto })
+  @ApiBody({
+    type: CreateBillDto,
+    examples: {
+      notaryBill: {
+        summary: 'Notary Bill Example',
+        value: {
+          client_id: 'd242893a-fc84-4649-b7f8-80efd64a2c52',
+          bill_type: 'NOTARY',
+          notary_items: [
+            {
+              service_id: 'optional-uuid',
+              service_name: 'Power of Attorney',
+              sub_service_name: 'General POA',
+              quantity: 1,
+              unit_price: 5000,
+              notes: 'Urgent',
+            },
+          ],
+          notes: 'Notary bill example',
+        },
+      },
+      secretariatBill: {
+        summary: 'Secretariat Bill Example',
+        value: {
+          client_id: 'd242893a-fc84-4649-b7f8-80efd64a2c52',
+          bill_type: 'SECRETARIAT',
+          secretariat_items: [
+            {
+              service_id: 'optional-uuid',
+              service_name: 'Document Printing',
+              quantity: 10,
+              unit_price: 100,
+              notes: 'Color prints',
+            },
+          ],
+          notes: 'Secretariat bill example',
+        },
+      },
+      combinedBill: {
+        summary: 'Combined Bill Example (NOTARY + SECRETARIAT)',
+        value: {
+          client_id: 'd242893a-fc84-4649-b7f8-80efd64a2c52',
+          bill_type: 'BOTH',
+          notary_items: [
+            {
+              service_id: 'optional-uuid',
+              service_name: 'Affidavit',
+              sub_service_name: 'Sworn Statement',
+              quantity: 1,
+              unit_price: 3000,
+            },
+          ],
+          secretariat_items: [
+            {
+              service_id: 'optional-uuid',
+              service_name: 'Typing',
+              quantity: 5,
+              unit_price: 200,
+            },
+          ],
+          notes: 'Combined services',
+        },
+      },
+    },
+  })
   @ApiCreatedResponse({
     description: 'Bill created successfully',
     type: BillResponseDto,
@@ -185,14 +269,14 @@ export class BillController {
     return this.billService.updateBillStatus(user.id, user.businessId, dto);
   }
 
-  // ==================== Rejection & Refund ====================
+  // ==================== Refund Management ====================
 
   @Post('reject')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Reject a bill',
     description:
-      'Rejects a bill, optionally processes a refund (full, half, or custom). No notary record is created.',
+      'Rejects a bill, optionally creates a refund request. No notary record is created.',
   })
   @ApiBody({ type: RejectBillDto })
   @ApiOkResponse({ description: 'Bill rejected successfully' })
@@ -200,8 +284,73 @@ export class BillController {
   async rejectBill(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: RejectBillDto,
-  ): Promise<{ message: string; bill: any }> {
-    return this.billService.rejectBill(user.id, user.businessId, dto);
+  ): Promise<RejectBillResponseDto> {
+    return this.billService.rejectBill(
+      user.id,
+      user.businessId,
+      user.role,
+      user.businessRoles || [],
+      dto,
+    );
+  }
+
+  @Post('refunds/process')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Process a refund',
+    description:
+      'Processes a pending refund request and updates the bill status to REFUNDED.',
+  })
+  @ApiBody({ type: ProcessRefundDto })
+  @ApiOkResponse({ description: 'Refund processed successfully' })
+  async processRefund(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ProcessRefundDto,
+  ): Promise<any> {
+    return this.billService.processRefund(
+      user.id,
+      user.businessId,
+      user.role,
+      user.businessRoles || [],
+      dto,
+    );
+  }
+  @Get('refunds/pending')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Get pending refund requests',
+    description: 'Retrieves all pending refund requests awaiting processing.',
+  })
+  @ApiOkResponse({ description: 'Pending refunds retrieved successfully' })
+  async getPendingRefunds(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<any> {
+    return this.billService.getPendingRefunds(
+      user.businessId,
+      user.id,
+      user.role,
+      user.businessRoles || [],
+    );
+  }
+  @Delete('refunds/:refundId/cancel')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Cancel a refund request',
+    description: 'Cancels a pending refund request.',
+  })
+  @ApiParam({ name: 'refundId', description: 'Refund UUID', type: 'string' })
+  @ApiOkResponse({ description: 'Refund request cancelled successfully' })
+  async cancelRefundRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('refundId', ParseUUIDPipe) refundId: string,
+  ): Promise<any> {
+    return this.billService.cancelRefundRequest(
+      refundId,
+      user.businessId,
+      user.id,
+      user.role,
+      user.businessRoles || [],
+    );
   }
 
   // ==================== Serve Bill (Create Notary Record) ====================
@@ -253,8 +402,8 @@ export class BillController {
       'Generates a financial report for notary, secretariat, or combined services.',
   })
   @ApiQuery({
-    name: 'type',
-    enum: ['notary', 'secretariat', 'combined'],
+    name: 'bill_type',
+    enum: BillType,
     description: 'Report type',
   })
   @ApiOkResponse({
@@ -264,9 +413,12 @@ export class BillController {
   async getFinancialReport(
     @CurrentUser() user: AuthenticatedUser,
     @Query() filters: ReportFiltersDto,
-    @Query('type') type: 'notary' | 'secretariat' | 'combined' = 'combined',
   ): Promise<FinancialReportDto> {
-    return this.billService.getFinancialReport(user.businessId, filters, type);
+    return this.billService.getFinancialReport(
+      user.businessId,
+      filters,
+      filters.bill_type || BillType.BOTH,
+    );
   }
 
   @Get('reports/daily-sales')
@@ -319,6 +471,212 @@ export class BillController {
       bill_type: BillType.NOTARY,
       page: 1,
       limit: 100,
+    });
+  }
+
+  // ==================== Add Items to Bill ====================
+
+  @Post('add-items')
+  @Roles(
+    EBusinessRole.OWNER,
+    EBusinessRole.RECEPTIONIST,
+    EBusinessRole.SECRETARIAT,
+  )
+  @ApiOperation({
+    summary: 'Add items to existing bill',
+    description: 'Adds notary and/or secretariat items to a pending bill.',
+  })
+  @ApiBody({ type: AddItemsToBillDto })
+  @ApiOkResponse({
+    description: 'Items added successfully',
+    type: BillResponseDto,
+  })
+  async addItemsToBill(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: AddItemsToBillDto,
+  ) {
+    return this.billService.addItemsToBill(user.id, user.businessId, dto);
+  }
+
+  // ==================== Pending Bills by Type ====================
+
+  @Get('pending/notary')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Get pending notary bills',
+    description: 'Returns paid bills awaiting notary service.',
+  })
+  async getPendingNotaryBills(@CurrentUser() user: AuthenticatedUser) {
+    return this.billService.getPendingNotaryBills(user.businessId);
+  }
+
+  @Get('pending/secretariat')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Get pending secretariat bills',
+    description: 'Returns paid bills awaiting secretariat service.',
+  })
+  async getPendingSecretariatBills(@CurrentUser() user: AuthenticatedUser) {
+    return this.billService.getPendingSecretariatBills(user.businessId);
+  }
+
+  // ==================== Notary Records Management ====================
+
+  @Get('notary-records')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Get notary records',
+    description: 'Returns all notary records with filters.',
+  })
+  @ApiQuery({ name: 'book_type', required: false, enum: BookType })
+  @ApiQuery({ name: 'start_date', required: false, type: 'string' })
+  @ApiQuery({ name: 'end_date', required: false, type: 'string' })
+  @ApiQuery({ name: 'client_id', required: false, type: 'string' })
+  @ApiQuery({ name: 'page', required: false, type: 'number' })
+  @ApiQuery({ name: 'limit', required: false, type: 'number' })
+  async getNotaryRecords(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: any,
+  ) {
+    return this.billService.getNotaryRecords(user.id, user.businessId, {
+      book_type: query.book_type,
+      start_date: query.start_date,
+      end_date: query.end_date,
+      client_id: query.client_id,
+      page: query.page,
+      limit: query.limit,
+    });
+  }
+
+  @Put('notary-records/:recordId')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Update notary record',
+    description: 'Updates an existing notary record.',
+  })
+  @ApiParam({ name: 'recordId', description: 'Notary Record UUID' })
+  async updateNotaryRecord(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('recordId') recordId: string,
+    @Body() dto: Partial<NotaryRecord>,
+  ) {
+    return this.billService.updateNotaryRecord(
+      recordId,
+      user.businessId,
+      user.id,
+      user.role,
+      user.businessRoles || [],
+      dto,
+    );
+  }
+
+  // ==================== Financial Reports (Separated) ====================
+
+  @Get('reports/financial/notary')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Generate notary financial report',
+    description:
+      'Returns detailed notary financial report with all transactions.',
+  })
+  async getNotaryFinancialReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() filters: ReportFiltersDto,
+  ) {
+    return this.billService.getNotaryFinancialReport(user.businessId, filters);
+  }
+
+  @Get('reports/financial/secretariat')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Generate secretariat financial report',
+    description:
+      'Returns detailed secretariat financial report with all transactions.',
+  })
+  async getSecretariatFinancialReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() filters: ReportFiltersDto,
+  ) {
+    return this.billService.getSecretariatFinancialReport(
+      user.businessId,
+      filters,
+    );
+  }
+
+  // ==================== Dashboard Statistics ====================
+
+  @Get('stats/dashboard')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Get dashboard statistics',
+    description:
+      'Returns comprehensive dashboard statistics including today, pending, and monthly metrics.',
+  })
+  async getDashboardStatistics(@CurrentUser() user: AuthenticatedUser) {
+    return this.billService.getDashboardStatistics(user.businessId);
+  }
+
+  // ==================== Refund Management ====================
+
+  @Get('refunds/all')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Get all refunds',
+    description: 'Returns all refunds with filters.',
+  })
+  async getAllRefunds(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: any,
+  ) {
+    return this.billService.getAllRefunds(user.businessId, {
+      status: query.status,
+      start_date: query.start_date,
+      end_date: query.end_date,
+      page: query.page,
+      limit: query.limit,
+    });
+  }
+
+  @Put('refunds/:refundId')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Update refund request',
+    description: 'Updates a pending refund request.',
+  })
+  @ApiParam({ name: 'refundId', description: 'Refund UUID' })
+  async updateRefundRequest(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('refundId') refundId: string,
+    @Body() dto: Partial<Refund>,
+  ) {
+    return this.billService.updateRefundRequest(
+      refundId,
+      user.businessId,
+      user.id,
+      user.role,
+      user.businessRoles || [],
+      dto,
+    );
+  }
+
+  // ==================== Payment Management ====================
+
+  @Get('payments/all')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Get all payments',
+    description: 'Returns all payments with filters.',
+  })
+  async getAllPayments(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: any,
+  ) {
+    return this.billService.getAllPayments(user.businessId, {
+      method: query.method,
+      start_date: query.start_date,
+      end_date: query.end_date,
+      page: query.page,
+      limit: query.limit,
     });
   }
 }

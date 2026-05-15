@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   BillStatus,
@@ -9,16 +10,17 @@ import {
   MaritalStatus,
   VerificationStatus,
 } from 'src/shared/enums/client.enum';
+import { IsOptional } from 'class-validator';
 
 export class ClientInfoDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  full_name: string;
+  full_name!: string;
 
   @ApiProperty()
-  id_number: string;
+  id_number!: string;
 
   @ApiPropertyOptional()
   father_name?: string;
@@ -65,28 +67,28 @@ export class ClientInfoDto {
 
 export class NotaryItemDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  service_name: string;
+  service_name!: string;
 
   @ApiProperty()
-  sub_service_name: string;
+  sub_service_name!: string;
 
   @ApiProperty()
-  quantity: number;
+  quantity!: number;
 
   @ApiProperty()
-  unit_price: number;
+  unit_price!: number;
 
   @ApiProperty()
-  subtotal: number;
+  subtotal!: number;
 
   @ApiProperty()
-  vat_amount: number;
+  vat_amount!: number;
 
   @ApiProperty()
-  total: number;
+  total!: number;
 
   @ApiPropertyOptional()
   notes?: string;
@@ -94,22 +96,22 @@ export class NotaryItemDto {
 
 export class SecretariatItemDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  service_name: string;
+  service_name!: string;
 
   @ApiProperty()
-  quantity: number;
+  quantity!: number;
 
   @ApiProperty()
-  unit_price: number;
+  unit_price!: number;
 
   @ApiProperty()
-  subtotal: number;
+  subtotal!: number;
 
   @ApiProperty()
-  total: number;
+  total!: number;
 
   @ApiPropertyOptional()
   notes?: string;
@@ -117,60 +119,60 @@ export class SecretariatItemDto {
 
 export class PaymentDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  amount: number;
+  amount!: number;
 
   @ApiProperty({ enum: PaymentMethod })
-  method: PaymentMethod;
+  method: PaymentMethod = PaymentMethod.CASH;
 
   @ApiPropertyOptional()
   reference?: string;
 
   @ApiProperty()
-  processed_by_name: string;
+  processed_by_name!: string;
 
   @ApiProperty()
-  processed_at: Date;
+  processed_at!: Date;
 }
 
 export class BillResponseDto {
   @ApiProperty()
-  id: string;
+  id!: string;
 
   @ApiProperty()
-  bill_number: string;
+  bill_number!: string;
 
   @ApiProperty({ enum: BillType })
-  bill_type: BillType;
+  bill_type: BillType = BillType.NOTARY;
 
   @ApiProperty()
-  client: ClientInfoDto;
+  client: ClientInfoDto = new ClientInfoDto();
 
   @ApiProperty()
-  notary_subtotal: number;
+  notary_subtotal!: number;
 
   @ApiProperty()
-  notary_vat: number;
+  notary_vat!: number;
 
   @ApiProperty()
-  notary_total: number;
+  notary_total!: number;
 
   @ApiProperty()
-  secretariat_subtotal: number;
+  secretariat_subtotal!: number;
 
   @ApiProperty()
-  secretariat_total: number;
+  secretariat_total!: number;
 
   @ApiProperty()
-  grand_total: number;
+  grand_total!: number;
 
   @ApiProperty()
-  amount_paid: number;
+  amount_paid!: number;
 
   @ApiProperty()
-  remaining_balance: number;
+  remaining_balance!: number;
 
   @ApiProperty({ enum: BillStatus })
   status: BillStatus;
@@ -182,57 +184,57 @@ export class BillResponseDto {
   rejection_notes?: string;
 
   @ApiProperty({ type: [NotaryItemDto] })
-  notary_items: NotaryItemDto[];
+  notary_items: NotaryItemDto[] = [];
 
   @ApiProperty({ type: [SecretariatItemDto] })
-  secretariat_items: SecretariatItemDto[];
+  secretariat_items: SecretariatItemDto[] = [];
 
   @ApiProperty({ type: [PaymentDto] })
-  payments: PaymentDto[];
+  payments: PaymentDto[] = [];
 
   @ApiProperty()
-  created_by_name: string;
+  created_by_name!: string;
 
   @ApiProperty()
-  created_by_role: string;
+  created_by_role!: string;
 
   @ApiProperty()
-  created_at: Date;
+  created_at!: Date;
 
   @ApiProperty()
-  updated_at: Date;
+  updated_at!: Date;
 }
 
 export class PaginatedResponseDto {
   @ApiProperty()
-  data: any[];
+  data: any[] = [];
 
   @ApiProperty()
-  total: number;
+  total!: number;
 
   @ApiProperty()
-  page: number;
+  page!: number;
 
   @ApiProperty()
-  limit: number;
+  limit!: number;
 
   @ApiProperty()
-  totalPages: number;
+  totalPages!: number;
 }
 
 export class RecordPaymentResponseDto {
   @ApiProperty()
-  message: string;
+  message!: string;
 
   @ApiProperty()
-  payment: {
+  payment!: {
     id: string;
     amount: number;
     method: PaymentMethod;
   };
 
   @ApiProperty()
-  bill: {
+  bill!: {
     id: string;
     status: BillStatus;
     amount_paid: number;
@@ -240,25 +242,25 @@ export class RecordPaymentResponseDto {
   };
 }
 
-export class RejectBillResponseDto {
-  @ApiProperty()
-  message: string;
+// export class RejectBillResponseDto {
+//   @ApiProperty()
+//   message: string;
 
-  @ApiProperty()
-  bill: {
-    id: string;
-    status: BillStatus;
-    refund_processed: boolean;
-    refund_amount: number;
-  };
-}
+//   @ApiProperty()
+//   bill: {
+//     id: string;
+//     status: BillStatus;
+//     refund_processed: boolean;
+//     refund_amount: number;
+//   };
+// }
 
 export class ServeBillResponseDto {
   @ApiProperty()
-  message: string;
+  message!: string;
 
   @ApiProperty()
-  notary_record: {
+  notary_record!: {
     id: string;
     display_number: string;
     volume: string | null;
@@ -270,7 +272,7 @@ export class ServeBillResponseDto {
   };
 
   @ApiProperty()
-  bill: {
+  bill!: {
     id: string;
     status: BillStatus;
   };
@@ -278,7 +280,7 @@ export class ServeBillResponseDto {
 
 export class PaymentHistoryResponseDto {
   @ApiProperty()
-  bill: {
+  bill!: {
     id: string;
     bill_number: string;
     grand_total: number;
@@ -287,120 +289,229 @@ export class PaymentHistoryResponseDto {
   };
 
   @ApiProperty({ type: [PaymentDto] })
-  payments: PaymentDto[];
+  payments: PaymentDto[] = [];
 }
 
 export class MinijustReportRecordDto {
   @ApiProperty()
-  date: Date;
+  date!: Date;
 
   @ApiProperty()
-  book_type: string;
+  book_type!: string;
 
   @ApiProperty()
-  volume: string;
+  volume!: string;
 
   @ApiProperty()
-  number: string;
+  number!: string;
 
   @ApiProperty()
-  client_full_name: string;
+  client_full_name!: string;
 
   @ApiProperty()
-  client_id_number: string;
+  client_id_number!: string;
 
   @ApiProperty()
-  service_name: string;
+  service_name!: string;
 
   @ApiProperty()
-  sub_service_name: string;
+  sub_service_name!: string;
 
-  @ApiProperty()
-  amount: number;
+  //   @ApiProperty()
+  //   amount: number;
 }
 
 export class MinijustReportDto {
   @ApiProperty()
-  period: {
+  period!: {
     start_date: string;
     end_date: string;
   };
 
   @ApiProperty({ type: [MinijustReportRecordDto] })
-  records: MinijustReportRecordDto[];
+  records: MinijustReportRecordDto[] = [];
 
   @ApiProperty()
-  total_records: number;
+  total_records!: number;
 
-  @ApiProperty()
-  total_amount: number;
+  //   @ApiProperty()
+  //   total_amount: number;
 }
 
 export class FinancialReportSummaryDto {
   @ApiProperty()
-  total_bills: number;
+  total_bills!: number;
 
   @ApiProperty()
-  total_notary_revenue: number;
+  total_notary_revenue!: number;
 
   @ApiProperty()
-  total_secretariat_revenue: number;
+  total_secretariat_revenue!: number;
 
   @ApiProperty()
-  total_vat_collected: number;
+  total_vat_collected!: number;
 
   @ApiProperty()
-  total_refunds: number;
+  total_refunds!: number;
 
   @ApiProperty()
-  net_revenue: number;
+  net_revenue!: number;
 }
 
+export class NotaryFinancialRecordDto {
+  @ApiProperty()
+  date!: Date;
+
+  @ApiProperty()
+  client_name!: string;
+
+  @ApiProperty()
+  client_id_number!: string;
+
+  @ApiProperty()
+  service_name!: string;
+
+  @ApiProperty()
+  sub_service_name!: string;
+
+  @ApiProperty()
+  quantity!: number;
+
+  @ApiProperty()
+  unit_price!: number;
+
+  @ApiProperty()
+  subtotal!: number;
+
+  @ApiProperty()
+  vat!: number;
+
+  @ApiProperty()
+  grand_total!: number;
+
+  @ApiProperty()
+  is_refunded: boolean = false;
+
+  @ApiProperty()
+  amount_refunded!: number;
+
+  @ApiProperty()
+  amount_after_refund!: number;
+
+  @ApiProperty()
+  bill_number!: string;
+
+  @ApiProperty()
+  bill_status: BillStatus;
+}
+
+export class SecretariatFinancialRecordDto {
+  @ApiProperty()
+  date!: Date;
+
+  @ApiProperty()
+  client_name!: string;
+
+  @ApiProperty()
+  client_id_number!: string;
+
+  @ApiProperty()
+  service_name!: string;
+
+  @ApiProperty()
+  quantity!: number;
+
+  @ApiProperty()
+  unit_price!: number;
+
+  @ApiProperty()
+  subtotal!: number;
+
+  @ApiProperty()
+  grand_total!: number;
+
+  @ApiProperty()
+  bill_number!: string;
+
+  @ApiProperty()
+  bill_status: BillStatus;
+}
 export class FinancialReportDto {
   @ApiProperty()
-  period: {
+  period!: {
     start_date: string;
     end_date: string;
   };
 
-  @ApiProperty()
-  summary: FinancialReportSummaryDto;
+  @ApiProperty({ enum: BillType })
+  type: BillType = BillType.NOTARY;
 
   @ApiProperty()
-  breakdown_by_status: Record<string, { count: number; amount: number }>;
+  summary: FinancialReportSummaryDto = new FinancialReportSummaryDto();
+
+  @ApiProperty({ type: [Object] })
+  records?: NotaryFinancialRecordDto[] | SecretariatFinancialRecordDto[];
 
   @ApiProperty()
-  breakdown_by_payment_method: Record<
+  breakdown_by_status!: Record<string, { count: number; amount: number }>;
+
+  @ApiProperty()
+  breakdown_by_payment_method!: Record<
     string,
     { count: number; amount: number }
   >;
 }
 
+export class RejectBillResponseDto {
+  @ApiProperty()
+  message!: string;
+
+  @ApiProperty()
+  bill!: {
+    id: string;
+    status: BillStatus;
+    refund_status?: string;
+    refund_requested_amount?: number;
+    refund_processed: boolean;
+    refund_amount: number;
+  };
+
+  @ApiPropertyOptional()
+  refund?: {
+    id: string;
+    status: string;
+    requested_amount: number;
+  } | null;
+}
 export class DailySalesReportDto {
   @ApiProperty()
-  period: {
+  period!: {
     start_date: string;
     end_date: string;
   };
 
   @ApiProperty()
-  summary: {
+  summary!: {
     total_bills: number;
     total_revenue: number;
+    total_notary_revenue: number;
+    total_secretariat_revenue: number;
     total_vat: number;
     average_bill_value: number;
   };
 
   @ApiProperty()
-  payment_method_breakdown: Record<string, { amount: number; count: number }>;
+  payment_method_breakdown!: Record<string, { amount: number; count: number; }>;
 
   @ApiProperty()
   transactions: Array<{
     id: string;
     bill_number: string;
     client_name: string;
-    amount: number;
+    notary_amount: number;
+    secretariat_amount: number;
+    total: number;
     vat: number;
     date: Date;
-  }>;
+  }> = [];
 }

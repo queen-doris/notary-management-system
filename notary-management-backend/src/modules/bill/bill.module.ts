@@ -14,6 +14,7 @@ import { NotaryRecord } from '../../shared/entities/notary-record.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import { Refund } from '../../shared/entities/refund.entity';
 import { AuthModule } from '../auth/auth.module';
+import { AddItemsToBillDto } from './dto/add-items.dto';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { AuthModule } from '../auth/auth.module';
       NotaryRecord,
       Payment,
       Refund,
+      AddItemsToBillDto,
     ]),
     AuthModule,
   ],

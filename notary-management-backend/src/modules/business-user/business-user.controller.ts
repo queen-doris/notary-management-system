@@ -34,7 +34,7 @@ export class BusinessUserController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(EUserRole.SUPERADMIN)
   @Post()
-  @ApiBearerAuth() // Add this
+  @ApiBearerAuth('access-token') // Add this
   @ApiOperation({
     summary: 'Create business membership (Super Admin only)',
     description: 'Adds an existing user to a business with specific roles',
@@ -78,7 +78,7 @@ export class BusinessUserController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(EBusinessRole.OWNER, EUserRole.SUPERADMIN)
   @Post('staff')
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Create business staff member',
     description:
@@ -91,7 +91,7 @@ export class BusinessUserController {
       secretariat: {
         summary: 'Create a secretariat',
         value: {
-          businessId: '123e4567-e89b-12d3-a456-426614174000',
+          businessId: 'd57082b6-3863-4dc2-a564-241637f38d7b',
           fullNames: 'John Doe',
           phone: '+250788123456',
           email: 'john.doe@example.com',
@@ -102,7 +102,7 @@ export class BusinessUserController {
       receptionist: {
         summary: 'Create a receptionist',
         value: {
-          businessId: '123e4567-e89b-12d3-a456-426614174000',
+          businessId: 'd57082b6-3863-4dc2-a564-241637f38d7b',
           fullNames: 'John Doe',
           phone: '+250788123456',
           email: 'john.doe@example.com',
@@ -113,7 +113,7 @@ export class BusinessUserController {
       accountant: {
         summary: 'Create an accountant',
         value: {
-          businessId: '123e4567-e89b-12d3-a456-426614174000',
+          businessId: 'd57082b6-3863-4dc2-a564-241637f38d7b',
           fullNames: 'Jane Smith',
           phone: '+250788123457',
           email: 'jane.smith@example.com',

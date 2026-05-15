@@ -14,9 +14,7 @@ export interface UploadResult {
 
 @Injectable()
 export class FileService {
-  constructor(
-    private readonly cloudinaryService: CloudinaryService,
-  ) {}
+  constructor(private readonly cloudinaryService: CloudinaryService) {}
 
   async uploadFile(file: Express.Multer.File): Promise<UploadResult> {
     if (!file) {

@@ -67,7 +67,7 @@ export class BusinessController {
 
   @Post('register-business')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Register a new business',
@@ -113,7 +113,7 @@ export class BusinessController {
 
   @Get('my-businesses/:businessId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Get single business by ID',
@@ -134,7 +134,7 @@ export class BusinessController {
 
   @Get('/by-id/:businessId')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get single business by ID',
     description: 'Retrieves detailed information about a specific business',
@@ -151,7 +151,7 @@ export class BusinessController {
 
   @Put('my-businesses/:businessId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Update business details',
@@ -174,7 +174,7 @@ export class BusinessController {
 
   @Patch('my-businesses/:businessId/deactivate')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EUserRole.SUPERADMIN)
   @ApiOperation({
     summary: 'Deactivate business',
@@ -195,7 +195,7 @@ export class BusinessController {
 
   @Patch('my-businesses/:businessId/reactivate')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EUserRole.SUPERADMIN)
   @ApiOperation({
     summary: 'Reactivate business',
@@ -216,7 +216,7 @@ export class BusinessController {
 
   @Get('my-statistics')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Get business statistics',
@@ -232,7 +232,7 @@ export class BusinessController {
 
   @Put('my-businesses/:businessId/hours')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Update business hours',
@@ -257,7 +257,7 @@ export class BusinessController {
 
   @Get(':businessId/status')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Check if business is currently open',
     description:
@@ -274,7 +274,7 @@ export class BusinessController {
 
   @Get('all')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get all businesses',
     description: 'Search businesses by various criteria (public endpoint)',
@@ -288,7 +288,7 @@ export class BusinessController {
 
   @Put('my-businesses/:businessId/location')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Update business location',
@@ -316,7 +316,7 @@ export class BusinessController {
 
   @Get('my-businesses/:businessId/analytics')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Get business analytics',
@@ -361,7 +361,7 @@ export class BusinessController {
 
   @Get('/statistics')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EUserRole.SUPERADMIN)
   @ApiOperation({
     summary: 'Get business statistics (Superadmin only)',
@@ -377,7 +377,7 @@ export class BusinessController {
 
   @Get('/workers')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Get business workers',
@@ -433,7 +433,7 @@ export class BusinessController {
 
   @Get('/worker/:id')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get business worker',
     description: 'Retrieves worker',
@@ -447,7 +447,7 @@ export class BusinessController {
 
   @Put('/fire/:workerId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Fire business worker',
@@ -461,7 +461,7 @@ export class BusinessController {
 
   @Put('/leave/:workerId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Put business worker on leave',
@@ -479,7 +479,7 @@ export class BusinessController {
 
   @Put('/suspend/:workerId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Suspend business worker',
@@ -496,7 +496,7 @@ export class BusinessController {
 
   @Put('/reactivate/:workerId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Reactivate business worker',
@@ -513,7 +513,7 @@ export class BusinessController {
 
   @Put('/deactivate/:workerId')
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Deactivate business worker',
@@ -533,7 +533,7 @@ export class BusinessController {
 
   @Get('/worker/:userId/leaves')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Get all Leaves',
   })

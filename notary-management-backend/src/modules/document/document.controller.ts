@@ -34,7 +34,7 @@ import { DocumentService } from './document.service';
 import {
   UploadDocumentDto,
   UpdateDocumentMetadataDto,
-} from './dto/upload-document.dto';
+} from './dto/upload-documents.dto';
 import { SearchDocumentDto } from './dto/search-document.dto';
 import { BulkUploadItemDto } from './dto/bulk-upload.dto';
 import {
@@ -54,7 +54,7 @@ import { AuthenticatedUser } from '../../shared/interfaces/authenticated-user.in
 @ApiTags('Documents')
 @Controller('documents')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
+@ApiBearerAuth('access-token')
 export class DocumentController {
   constructor(private readonly documentService: DocumentService) {}
 
