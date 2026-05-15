@@ -282,7 +282,7 @@ export class DocumentService {
   async getPendingUploads(businessId: string): Promise<PendingUploadItemDto[]> {
     const records = await this.notaryRecordRepository
       .createQueryBuilder('record')
-      .leftJoin('record.documents', 'doc')
+      .leftJoin('record.attachments', 'doc')
       .where('record.business_id = :businessId', { businessId })
       .andWhere('record.status = :status', { status: 'active' })
       .groupBy('record.id')
