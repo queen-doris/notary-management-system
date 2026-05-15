@@ -10,6 +10,7 @@ import { EUserRole } from 'src/shared/enums/user-role.enum';
 import { ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('Super Admin')
+@ApiBearerAuth('access-token')
 @Controller('super-admin')
 export class SuperAdminController {
   constructor(private readonly superAdminService: SuperAdminService) {}

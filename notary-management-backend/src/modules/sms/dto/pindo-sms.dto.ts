@@ -1,28 +1,65 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
 export class SendSmsDto {
+  @ApiProperty({
+    description: 'Recipient phone (E.164)',
+    example: '+250788123456',
+  })
   to: string;
+
+  @ApiProperty({
+    description: 'Message body',
+    example: 'Your record is ready.',
+  })
   text: string;
+
+  @ApiPropertyOptional({ description: 'Sender ID', example: 'NOTARY' })
   sender?: string;
 }
 
 export class BulkRecipient {
+  @ApiProperty({
+    description: 'Recipient phone (E.164)',
+    example: '+250788123456',
+  })
   phonenumber: string;
+
+  @ApiPropertyOptional({ description: 'Recipient name' })
   name?: string;
+
   [key: string]: any;
 }
 
 export class SendBulkSmsDto {
+  @ApiProperty({ type: [BulkRecipient], description: 'Recipients list' })
   recipients: BulkRecipient[];
+
+  @ApiProperty({ description: 'Message body' })
   text: string;
+
+  @ApiPropertyOptional({ description: 'Sender ID' })
   sender?: string;
 }
 
 export class GenerateOtpDto {
+  @ApiProperty({ description: 'Brand/app name shown in the OTP message' })
   brand: string;
+
+  @ApiProperty({
+    description: 'Phone number (E.164)',
+    example: '+250788123456',
+  })
   number: string;
 }
 
 export class VerifyOtpDto {
+  @ApiProperty({ description: 'The OTP code', example: '123456' })
   code: string;
+
+  @ApiProperty({
+    description: 'Request id returned by generate-otp',
+    example: 12345,
+  })
   request_id: number;
 }
 

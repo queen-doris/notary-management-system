@@ -1,62 +1,64 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RecordStatus } from '../../../shared/enums/record-status.enum';
 
 export class ClientInfoDto {
-  id: string;
-  full_name: string;
-  id_number: string;
-  phone?: string;
-  verification_status?: string;
+  @ApiProperty() id: string;
+  @ApiProperty() full_name: string;
+  @ApiProperty() id_number: string;
+  @ApiPropertyOptional() phone?: string;
+  @ApiPropertyOptional() verification_status?: string;
 }
 
 export class BillInfoDto {
-  id: string;
-  bill_number: string;
-  total_amount: number;
-  status: string;
+  @ApiProperty() id: string;
+  @ApiProperty() bill_number: string;
+  @ApiProperty() total_amount: number;
+  @ApiProperty() status: string;
 }
 
 export class RecordResponseDto {
-  id: string;
-  book_type: string;
-  book_id: string | null;
-  volume: string | null;
-  record_number: string;
-  display_number: string;
-  service_category: string;
-  sub_service: string;
-  amount: number;
-  vat_amount: number;
-  total: number;
-  upi?: string;
-  document_description?: string;
-  notary_notes?: string;
-  status: RecordStatus;
-  has_documents: boolean;
-  served_by_name: string;
-  served_date: Date;
-  client: ClientInfoDto;
-  bill: BillInfoDto;
-  created_at: Date;
-  updated_at: Date;
+  @ApiProperty() id: string;
+  @ApiProperty() book_type: string;
+  @ApiProperty({ nullable: true }) book_id: string | null;
+  @ApiProperty({ nullable: true }) volume: string | null;
+  @ApiProperty() record_number: string;
+  @ApiProperty() display_number: string;
+  @ApiProperty() service_category: string;
+  @ApiProperty() sub_service: string;
+  @ApiProperty() amount: number;
+  @ApiProperty() vat_amount: number;
+  @ApiProperty() total: number;
+  @ApiPropertyOptional() upi?: string;
+  @ApiPropertyOptional() document_description?: string;
+  @ApiPropertyOptional() notary_notes?: string;
+  @ApiProperty({ enum: RecordStatus }) status: RecordStatus;
+  @ApiProperty() has_documents: boolean;
+  @ApiProperty() served_by_name: string;
+  @ApiProperty() served_date: Date;
+  @ApiProperty({ type: ClientInfoDto }) client: ClientInfoDto;
+  @ApiProperty({ type: BillInfoDto }) bill: BillInfoDto;
+  @ApiProperty() created_at: Date;
+  @ApiProperty() updated_at: Date;
 }
 
 export class RecordListItemDto {
-  id: string;
-  record_number: string;
-  volume: string | null;
-  number: string;
-  client_name: string;
-  client_id_number: string;
-  service: string;
-  amount: number;
-  served_date: Date;
-  has_documents: boolean;
+  @ApiProperty() id: string;
+  @ApiProperty() record_number: string;
+  @ApiProperty({ nullable: true }) volume: string | null;
+  @ApiProperty() number: string;
+  @ApiProperty() client_name: string;
+  @ApiProperty() client_id_number: string;
+  @ApiProperty() service: string;
+  @ApiProperty() amount: number;
+  @ApiProperty() served_date: Date;
+  @ApiProperty() has_documents: boolean;
 }
 
 export class PaginatedRecordsResponseDto {
+  @ApiProperty({ type: [RecordListItemDto] })
   data: RecordListItemDto[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
+  @ApiProperty() total: number;
+  @ApiProperty() page: number;
+  @ApiProperty() limit: number;
+  @ApiProperty() totalPages: number;
 }

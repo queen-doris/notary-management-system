@@ -15,6 +15,7 @@ import { EUserRole } from 'src/shared/enums/user-role.enum';
 import { BusinessOwnerQueryDto } from './dto/business-owner-query.dto';
 
 @ApiTags('Business owners')
+@ApiBearerAuth('access-token')
 @Controller('business-owners')
 export class BusinessOwnersController {
   constructor(private readonly userService: UserService) {}

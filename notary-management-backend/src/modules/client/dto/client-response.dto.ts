@@ -1,41 +1,44 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   MaritalStatus,
   VerificationStatus,
 } from '../../../shared/enums/client.enum';
 
 export class BillSummaryDto {
-  id: string;
-  bill_number: string;
-  total_amount: number;
-  status: string;
-  created_at: Date;
+  @ApiProperty() id: string;
+  @ApiProperty() bill_number: string;
+  @ApiProperty() total_amount: number;
+  @ApiProperty() status: string;
+  @ApiProperty() created_at: Date;
 }
 
 export class ClientResponseDto {
-  id: string;
-  full_name: string;
-  id_number: string;
-  phone?: string;
-  email?: string;
-  father_name?: string;
-  mother_name?: string;
-  province?: string;
-  district?: string;
-  sector?: string;
-  cell?: string;
-  village?: string;
-  date_of_birth?: Date;
-  marital_status: MaritalStatus;
-  partner_name?: string;
-  upi?: string;
+  @ApiProperty() id: string;
+  @ApiProperty() full_name: string;
+  @ApiProperty() id_number: string;
+  @ApiPropertyOptional() phone?: string;
+  @ApiPropertyOptional() email?: string;
+  @ApiPropertyOptional() father_name?: string;
+  @ApiPropertyOptional() mother_name?: string;
+  @ApiPropertyOptional() province?: string;
+  @ApiPropertyOptional() district?: string;
+  @ApiPropertyOptional() sector?: string;
+  @ApiPropertyOptional() cell?: string;
+  @ApiPropertyOptional() village?: string;
+  @ApiPropertyOptional() date_of_birth?: Date;
+  @ApiProperty({ enum: MaritalStatus }) marital_status: MaritalStatus;
+  @ApiPropertyOptional() partner_name?: string;
+  @ApiPropertyOptional() upi?: string;
+  @ApiProperty({ enum: VerificationStatus })
   verification_status: VerificationStatus;
-  verification_notes?: string;
-  verified_at?: Date;
-  is_active: boolean;
-  notes?: string;
-  created_at: Date;
-  updated_at: Date;
-  total_bills?: number;
-  total_spent?: number;
+  @ApiPropertyOptional() verification_notes?: string;
+  @ApiPropertyOptional() verified_at?: Date;
+  @ApiProperty() is_active: boolean;
+  @ApiPropertyOptional() notes?: string;
+  @ApiProperty() created_at: Date;
+  @ApiProperty() updated_at: Date;
+  @ApiPropertyOptional() total_bills?: number;
+  @ApiPropertyOptional() total_spent?: number;
+  @ApiPropertyOptional({ type: [BillSummaryDto] })
   recent_bills?: BillSummaryDto[];
 }
