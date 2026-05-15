@@ -19,6 +19,7 @@ export interface CloudinaryUploadResult {
   folder: string;
   original_filename: string;
   api_key: string;
+  duration?: number; // present only for video/audio uploads
 }
 
 export interface CloudinaryDeleteResult {

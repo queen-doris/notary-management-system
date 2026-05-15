@@ -2,7 +2,7 @@ import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Client } from './client.entity';
 import { Business } from './business.entity';
 import { Bill } from './bill.entity';
-import { BookType } from '../enums/book-type.enum';
+import { Book } from './book.entity';
 import { RecordStatus } from '../enums/record-status.enum';
 import { MaritalStatus, VerificationStatus } from '../enums/client.enum';
 import { BaseEntity } from './base.entity';
@@ -17,10 +17,14 @@ import { BusinessUser } from './business-user.entity';
 @Index(['client_id_number'])
 export class NotaryRecord extends BaseEntity {
   // ============================================
-  // Book Information
+  // Book Information (book_type kept as a denormalized
+  // slug snapshot; book_id is the joinable FK)
   // ============================================
-  @Column({ type: 'enum', enum: BookType, name: 'book_type' })
-  book_type: BookType;
+  @Column({ type: 'varchar', length: 50, name: 'book_type' })
+  book_type: string;
+
+  @Column({ type: 'uuid', nullable: true, name: 'book_id' })
+  book_id: string | null;
 
   @Column({ type: 'varchar', length: 20, nullable: true, name: 'volume' })
   volume: string | null;
@@ -217,4 +221,8 @@ export class NotaryRecord extends BaseEntity {
   @ManyToOne(() => BusinessUser)
   @JoinColumn({ name: 'served_by' })
   server: BusinessUser;
+
+  @ManyToOne(() => Book)
+  @JoinColumn({ name: 'book_id' })
+  book: Book | null;
 }

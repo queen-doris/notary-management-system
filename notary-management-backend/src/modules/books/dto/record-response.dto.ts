@@ -1,4 +1,3 @@
-import { BookType } from '../../../shared/enums/book-type.enum';
 import { RecordStatus } from '../../../shared/enums/record-status.enum';
 
 export class ClientInfoDto {
@@ -18,7 +17,8 @@ export class BillInfoDto {
 
 export class RecordResponseDto {
   id: string;
-  book_type: BookType;
+  book_type: string;
+  book_id: string | null;
   volume: string | null;
   record_number: string;
   display_number: string;

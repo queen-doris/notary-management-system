@@ -1,5 +1,3 @@
-import { BookType } from '../../../shared/enums/book-type.enum';
-
 export class BookTrackerStatsDto {
   current_volume: string | null;
   current_number: number;
@@ -10,18 +8,16 @@ export class BookTrackerStatsDto {
 }
 
 export class BookStatisticsDto {
-  book_type: BookType;
+  book_id: string;
+  book_name: string;
+  book_slug: string;
   total_records: number;
   total_amount: number;
   tracker: BookTrackerStatsDto | null;
 }
 
 export class AllBooksStatisticsResponseDto {
-  [BookType.LEGALISATION]?: BookStatisticsDto;
-  [BookType.NOTIFICATION]?: BookStatisticsDto;
-  [BookType.ACTES]?: BookStatisticsDto;
-  [BookType.LAND]?: BookStatisticsDto;
-  [BookType.IMIRAGE]?: BookStatisticsDto;
+  books: BookStatisticsDto[];
   grand_total: {
     total_records: number;
     total_amount: number;

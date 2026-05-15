@@ -7,21 +7,25 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { BookTracker } from '../../shared/entities/book-tracker.entity';
+import { Book } from '../../shared/entities/book.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
 import { Business } from '../../shared/entities/business.entity';
 import {
-  CreateBookTrackerDto,
+  CreateBookDto,
+  UpdateBookDto,
   UpdateBookTrackerDto,
 } from './dto/create-book-tracker.dto';
-import { BookType } from '../../shared/enums/book-type.enum';
+import { VolumeFormat } from '../../shared/enums/volume-format.enum';
 import { EBusinessRole } from '../../shared/enums/business-role.enum';
-import { EUserRole } from '../../shared/enums/user-role.enum';
-import { RecordStatus } from 'src/shared/enums/record-status.enum';
-import { AuthenticatedRequest } from '../../shared/interfaces/request.interface';
+import { RecordStatus } from '../../shared/enums/record-status.enum';
+import { DEFAULT_BOOKS } from '../notary-service/default-notary-services.data';
+import { Generators } from '../../common/utils/generator.utils';
 
-// Helper function for Roman numerals
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function intToRoman(num: number): string {
   const romanMap: [number, string][] = [
     [1000, 'M'],
@@ -82,158 +86,248 @@ export class BooksService {
   constructor(
     @InjectRepository(BookTracker)
     private bookTrackerRepository: Repository<BookTracker>,
+    @InjectRepository(Book)
+    private bookRepository: Repository<Book>,
     @InjectRepository(NotaryRecord)
     private notaryRecordRepository: Repository<NotaryRecord>,
     @InjectRepository(Business)
     private businessRepository: Repository<Business>,
+    private dataSource: DataSource,
   ) {}
 
   /**
-   * Get default configuration for each book type
+   * Resolve a Book by id or slug within a business.
    */
-  private getDefaultBookConfig(bookType: BookType): {
-    hasVolume: boolean;
-    volumeFormat: 'roman' | 'numeric' | null;
-    recordsPerVolume: number;
-    volumeSeparator: string;
-  } {
-    switch (bookType) {
-      case BookType.LEGALISATION:
-        return {
-          hasVolume: false,
-          volumeFormat: null,
-          recordsPerVolume: 0,
-          volumeSeparator: '',
-        };
-      case BookType.NOTIFICATION:
-        return {
-          hasVolume: false,
-          volumeFormat: null,
-          recordsPerVolume: 0,
-          volumeSeparator: '',
-        };
-      case BookType.ACTES:
-        return {
-          hasVolume: true,
-          volumeFormat: 'roman',
-          recordsPerVolume: 50,
-          volumeSeparator: '/',
-        };
-      case BookType.LAND:
-        return {
-          hasVolume: true,
-          volumeFormat: 'roman',
-          recordsPerVolume: 50,
-          volumeSeparator: '/',
-        };
-      case BookType.IMIRAGE:
-        return {
-          hasVolume: true,
-          volumeFormat: 'roman',
-          recordsPerVolume: 50,
-          volumeSeparator: '/',
-        };
-      default:
-        return {
-          hasVolume: false,
-          volumeFormat: null,
-          recordsPerVolume: 0,
-          volumeSeparator: '',
-        };
+  async resolveBook(businessId: string, ref: string): Promise<Book> {
+    const where = UUID_RE.test(ref)
+      ? { id: ref, business_id: businessId }
+      : { slug: ref, business_id: businessId };
+    const book = await this.bookRepository.findOne({ where });
+    if (!book) {
+      throw new NotFoundException(`Book "${ref}" not found`);
     }
+    return book;
   }
 
   /**
-   * Initialize book trackers for a new business
+   * Seed default books + their trackers for a newly created business.
    */
-  async initializeBusinessBooks(businessId: string): Promise<BookTracker[]> {
-    const bookTrackers: BookTracker[] = [];
+  async initializeBusinessBooks(businessId: string): Promise<Book[]> {
+    const existing = await this.bookRepository.count({
+      where: { business_id: businessId },
+    });
+    if (existing > 0) return [];
 
-    for (const bookType of Object.values(BookType)) {
-      const config = this.getDefaultBookConfig(bookType);
+    const createdBooks: Book[] = [];
 
-      const tracker = this.bookTrackerRepository.create({
-        book_type: bookType,
-        current_volume: config.hasVolume
-          ? config.volumeFormat === 'roman'
-            ? 'I'
-            : '1'
-          : undefined,
-        current_number: 0,
-        records_per_volume: config.recordsPerVolume,
-        records_in_current_volume: 0,
-        is_active: true,
-        business_id: businessId,
+    for (const def of DEFAULT_BOOKS) {
+      const book = await this.bookRepository.save(
+        this.bookRepository.create({
+          name: def.name,
+          slug: def.slug,
+          has_volume: def.has_volume,
+          volume_format: def.volume_format,
+          records_per_volume: def.records_per_volume,
+          volume_separator: def.volume_separator,
+          requires_upi: def.requires_upi,
+          increments_volume_on_serve: def.increments_volume_on_serve,
+          is_active: true,
+          is_custom: false,
+          business_id: businessId,
+        }),
+      );
+
+      await this.bookTrackerRepository.save(
+        this.bookTrackerRepository.create({
+          book_id: book.id,
+          current_volume: def.has_volume
+            ? def.volume_format === VolumeFormat.ROMAN
+              ? 'I'
+              : '1'
+            : undefined,
+          current_number: 0,
+          records_per_volume: def.records_per_volume,
+          records_in_current_volume: 0,
+          is_active: true,
+          business_id: businessId,
+        }),
+      );
+
+      createdBooks.push(book);
+    }
+
+    return createdBooks;
+  }
+
+  // ==================== Book CRUD ====================
+
+  async createBook(
+    businessId: string,
+    userRole: EBusinessRole,
+    dto: CreateBookDto,
+  ): Promise<{ book: Book; tracker: BookTracker }> {
+    if (userRole !== EBusinessRole.OWNER) {
+      throw new ForbiddenException('Only business owner can create books');
+    }
+
+    const slug = Generators.slugify(dto.name);
+    const existing = await this.bookRepository.findOne({
+      where: { business_id: businessId, slug },
+    });
+    if (existing) {
+      throw new ConflictException(
+        `A book with the name "${dto.name}" already exists`,
+      );
+    }
+
+    const hasVolume = dto.has_volume ?? false;
+    const volumeFormat = dto.volume_format ?? VolumeFormat.NONE;
+
+    return this.dataSource.transaction(async (manager) => {
+      const book = await manager.save(
+        manager.create(Book, {
+          name: dto.name,
+          slug,
+          description: dto.description,
+          has_volume: hasVolume,
+          volume_format: volumeFormat,
+          records_per_volume: dto.records_per_volume ?? 0,
+          volume_separator: dto.volume_separator ?? '/',
+          requires_upi: dto.requires_upi ?? false,
+          increments_volume_on_serve: dto.increments_volume_on_serve ?? false,
+          is_active: true,
+          is_custom: true,
+          business_id: businessId,
+        }),
+      );
+
+      const tracker = await manager.save(
+        manager.create(BookTracker, {
+          book_id: book.id,
+          current_volume: hasVolume
+            ? dto.current_volume ??
+              (volumeFormat === VolumeFormat.ROMAN ? 'I' : '1')
+            : undefined,
+          current_number: dto.current_number ?? 0,
+          records_per_volume: dto.records_per_volume ?? 0,
+          records_in_current_volume: dto.records_in_current_volume ?? 0,
+          is_active: true,
+          business_id: businessId,
+        }),
+      );
+
+      return { book, tracker };
+    });
+  }
+
+  async getBooks(businessId: string): Promise<Book[]> {
+    return this.bookRepository.find({
+      where: { business_id: businessId, is_active: true },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async getBookById(businessId: string, bookRef: string): Promise<Book> {
+    return this.resolveBook(businessId, bookRef);
+  }
+
+  async updateBook(
+    businessId: string,
+    userRole: EBusinessRole,
+    bookRef: string,
+    dto: UpdateBookDto,
+  ): Promise<Book> {
+    if (userRole !== EBusinessRole.OWNER) {
+      throw new ForbiddenException('Only business owner can update books');
+    }
+    const book = await this.resolveBook(businessId, bookRef);
+
+    if (dto.name && dto.name !== book.name) {
+      const slug = Generators.slugify(dto.name);
+      const clash = await this.bookRepository.findOne({
+        where: { business_id: businessId, slug },
       });
-
-      bookTrackers.push(tracker);
+      if (clash && clash.id !== book.id) {
+        throw new ConflictException(
+          `A book with the name "${dto.name}" already exists`,
+        );
+      }
+      book.slug = slug;
     }
 
-    return this.bookTrackerRepository.save(bookTrackers);
+    Object.assign(book, dto);
+    return this.bookRepository.save(book);
   }
 
-  /**
-   * Get all book trackers for a business
-   */
+  async deleteBook(
+    businessId: string,
+    userRole: EBusinessRole,
+    bookRef: string,
+  ): Promise<{ message: string }> {
+    if (userRole !== EBusinessRole.OWNER) {
+      throw new ForbiddenException('Only business owner can delete books');
+    }
+    const book = await this.resolveBook(businessId, bookRef);
+    book.is_active = false;
+    await this.bookRepository.save(book);
+    return { message: `Book "${book.name}" deactivated` };
+  }
+
+  // ==================== Book Trackers ====================
+
   async getBookTrackers(businessId: string): Promise<BookTracker[]> {
     return this.bookTrackerRepository.find({
       where: { business_id: businessId },
-      order: { book_type: 'ASC' },
+      relations: ['book'],
+      order: { createdAt: 'ASC' },
     });
   }
 
-  /**
-   * Get a specific book tracker
-   */
   async getBookTracker(
     businessId: string,
-    bookType: BookType,
+    bookRef: string,
   ): Promise<BookTracker> {
+    const book = await this.resolveBook(businessId, bookRef);
     const tracker = await this.bookTrackerRepository.findOne({
-      where: { business_id: businessId, book_type: bookType },
+      where: { business_id: businessId, book_id: book.id },
+      relations: ['book'],
     });
-
     if (!tracker) {
-      throw new NotFoundException(`Book tracker for ${bookType} not found`);
+      throw new NotFoundException(
+        `Book tracker for "${book.name}" not found`,
+      );
     }
-
     return tracker;
   }
 
-  /**
-   * Update book tracker (Only OWNER can do this)
-   */
   async updateBookTracker(
     businessId: string,
     userId: string,
-    userRoles: EBusinessRole,
-    bookType: BookType,
+    userRole: EBusinessRole,
+    bookRef: string,
     dto: UpdateBookTrackerDto,
   ): Promise<BookTracker> {
-    // Only OWNER can update book trackers
-    const isOwner = userRoles === EBusinessRole.OWNER;
-    if (!isOwner)
+    if (userRole !== EBusinessRole.OWNER) {
       throw new ForbiddenException(
-        'Only business owner can create custom secretariat services',
-      );
-
-    const tracker = await this.getBookTracker(businessId, bookType);
-    const config = this.getDefaultBookConfig(bookType);
-
-    // Validate updates
-    if (dto.current_volume && !config.hasVolume) {
-      throw new BadRequestException(
-        `${bookType} book does not support volumes`,
+        'Only business owner can update book trackers',
       );
     }
 
-    if (dto.records_per_volume !== undefined && config.recordsPerVolume === 0) {
+    const tracker = await this.getBookTracker(businessId, bookRef);
+    const book = tracker.book;
+
+    if (dto.current_volume && !book.has_volume) {
       throw new BadRequestException(
-        `${bookType} book does not have a volume record limit`,
+        `Book "${book.name}" does not support volumes`,
       );
     }
 
-    // Apply updates
+    if (dto.records_per_volume !== undefined && book.records_per_volume === 0) {
+      throw new BadRequestException(
+        `Book "${book.name}" does not have a volume record limit`,
+      );
+    }
+
     Object.assign(tracker, dto);
     await this.bookTrackerRepository.save(tracker);
 
@@ -241,72 +335,62 @@ export class BooksService {
   }
 
   /**
-   * Get next record number for a book (auto-increment logic)
-   */
-  /**
-   * Get next record number for a book (auto-increment logic)
+   * Get next record number for a book (auto-increment logic).
    */
   async getNextRecordNumber(
     businessId: string,
-    bookType: BookType,
+    bookRef: string,
   ): Promise<{
     volume: string | null;
     number: number;
     displayNumber: string;
     newRecordsInVolume: number;
   }> {
-    const tracker = await this.getBookTracker(businessId, bookType);
-    const config = this.getDefaultBookConfig(bookType);
+    const tracker = await this.getBookTracker(businessId, bookRef);
+    const book = tracker.book;
 
-    let newVolume = tracker.current_volume;
+    let newVolume = tracker.current_volume ?? null;
     let newNumber = tracker.current_number + 1;
     let newRecordsInVolume = tracker.records_in_current_volume + 1;
 
-    // Check if we need to increment volume (for books with volume limits)
     if (
-      config.recordsPerVolume > 0 &&
-      newRecordsInVolume > config.recordsPerVolume
+      book.records_per_volume > 0 &&
+      newRecordsInVolume > book.records_per_volume
     ) {
-      // Start new volume
-      if (config.volumeFormat === 'roman') {
+      if (book.volume_format === VolumeFormat.ROMAN) {
         newVolume = incrementRoman(tracker.current_volume || 'I');
-      } else if (config.volumeFormat === 'numeric') {
+      } else if (book.volume_format === VolumeFormat.NUMERIC) {
         newVolume = String(parseInt(tracker.current_volume || '0') + 1);
       }
       newNumber = 1;
       newRecordsInVolume = 1;
     }
 
-    // Generate display number
     let displayNumber: string;
-    if (config.hasVolume && newVolume) {
-      displayNumber = `${newNumber}${config.volumeSeparator}${newVolume}`;
+    if (book.has_volume && newVolume) {
+      displayNumber = `${newNumber}${book.volume_separator}${newVolume}`;
     } else {
       displayNumber = String(newNumber);
     }
 
-    // IMPORTANT: Return null (not undefined) for books without volumes
     return {
-      volume: config.hasVolume ? newVolume || null : null,
+      volume: book.has_volume ? newVolume || null : null,
       number: newNumber,
       displayNumber,
       newRecordsInVolume,
     };
   }
 
-  /**
-   * Update tracker after record creation
-   */
   async updateTrackerAfterRecord(
     businessId: string,
-    bookType: BookType,
+    bookRef: string,
     record: {
       volume: string | null;
       number: number;
       recordsInVolume: number;
     },
   ): Promise<void> {
-    const tracker = await this.getBookTracker(businessId, bookType);
+    const tracker = await this.getBookTracker(businessId, bookRef);
 
     tracker.current_volume = record.volume || tracker.current_volume;
     tracker.current_number = record.number;
@@ -315,12 +399,11 @@ export class BooksService {
     await this.bookTrackerRepository.save(tracker);
   }
 
-  /**
-   * Get all records for a specific book with pagination
-   */
+  // ==================== Records ====================
+
   async getBookRecords(
     businessId: string,
-    bookType: BookType,
+    bookRef: string,
     filters: {
       start_date?: string;
       end_date?: string;
@@ -329,12 +412,14 @@ export class BooksService {
       limit?: number;
     },
   ): Promise<any> {
+    const book = await this.resolveBook(businessId, bookRef);
+
     const query = this.notaryRecordRepository
       .createQueryBuilder('record')
       .leftJoinAndSelect('record.client', 'client')
       .leftJoinAndSelect('record.bill', 'bill')
       .where('record.business_id = :businessId', { businessId })
-      .andWhere('record.book_type = :bookType', { bookType });
+      .andWhere('record.book_id = :bookId', { bookId: book.id });
 
     if (filters.start_date) {
       query.andWhere('record.served_date >= :startDate', {
@@ -385,9 +470,6 @@ export class BooksService {
     };
   }
 
-  /**
-   * Get a single record by ID
-   */
   async getRecordById(
     recordId: string,
     businessId: string,
@@ -404,9 +486,6 @@ export class BooksService {
     return record;
   }
 
-  /**
-   * Get records by client
-   */
   async getRecordsByClient(
     clientId: string,
     businessId: string,
@@ -417,27 +496,21 @@ export class BooksService {
     });
   }
 
-  /**
-   * Get records by UPI (for land records)
-   */
   async getRecordsByUpi(
     upi: string,
     businessId: string,
   ): Promise<NotaryRecord[]> {
     return this.notaryRecordRepository.find({
-      where: { upi, business_id: businessId, book_type: BookType.LAND },
+      where: { upi, business_id: businessId },
       relations: ['client'],
     });
   }
 
-  /**
-   * Search records across all books
-   */
   async searchRecords(
     businessId: string,
     searchParams: {
       q?: string;
-      book_type?: BookType;
+      book_id?: string;
       start_date?: string;
       end_date?: string;
       page?: number;
@@ -449,10 +522,9 @@ export class BooksService {
       .leftJoinAndSelect('record.client', 'client')
       .where('record.business_id = :businessId', { businessId });
 
-    if (searchParams.book_type) {
-      query.andWhere('record.book_type = :bookType', {
-        bookType: searchParams.book_type,
-      });
+    if (searchParams.book_id) {
+      const book = await this.resolveBook(businessId, searchParams.book_id);
+      query.andWhere('record.book_id = :bookId', { bookId: book.id });
     }
 
     if (searchParams.q) {
@@ -488,6 +560,7 @@ export class BooksService {
         id: record.id,
         record_number: record.display_number,
         book_type: record.book_type,
+        book_id: record.book_id,
         client_name: record.client?.full_name,
         service: record.sub_service,
         amount: record.amount + record.vat_amount,
@@ -501,15 +574,12 @@ export class BooksService {
     };
   }
 
-  /**
-   * Archive old records (move to archive)
-   */
   async archiveRecords(
     businessId: string,
     userId: string,
     userBusinessRoles: EBusinessRole[],
     beforeDate: string,
-    bookType?: BookType,
+    bookRef?: string,
   ): Promise<{ archived_count: number }> {
     const isOwner = userBusinessRoles.includes(EBusinessRole.OWNER);
     if (!isOwner) {
@@ -523,8 +593,9 @@ export class BooksService {
       .where('business_id = :businessId', { businessId })
       .andWhere('served_date < :beforeDate', { beforeDate });
 
-    if (bookType) {
-      query.andWhere('book_type = :bookType', { bookType });
+    if (bookRef) {
+      const book = await this.resolveBook(businessId, bookRef);
+      query.andWhere('book_id = :bookId', { bookId: book.id });
     }
 
     const result = await query.execute();
@@ -532,96 +603,86 @@ export class BooksService {
     return { archived_count: result.affected || 0 };
   }
 
-  /**
-   * Get book statistics
-   */
-  async getBookStatistics(businessId: string): Promise<
-    Record<
-      BookType,
-      {
-        total_records: number;
-        total_amount: number;
-        tracker: {
-          current_volume?: string;
-          current_number: number;
-          records_in_volume: number;
-          records_per_volume: number;
-        } | null;
-      }
-    >
-  > {
-    const stats = await this.notaryRecordRepository
-      .createQueryBuilder('record')
-      .select('record.book_type', 'book_type')
-      .addSelect('COUNT(*)', 'total_records')
-      .addSelect('SUM(record.amount + record.vat_amount)', 'total_amount')
-      .where('record.business_id = :businessId', { businessId })
-      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE })
-      .groupBy('record.book_type')
-      .getRawMany();
-
-    const trackers = await this.getBookTrackers(businessId);
-
-    // Create a properly typed map
-    const trackerMap = new Map<
-      BookType,
-      {
+  async getBookStatistics(businessId: string): Promise<{
+    books: Array<{
+      book_id: string;
+      book_name: string;
+      book_slug: string;
+      total_records: number;
+      total_amount: number;
+      tracker: {
         current_volume?: string;
         current_number: number;
         records_in_volume: number;
         records_per_volume: number;
-      }
-    >();
+      } | null;
+    }>;
+    grand_total: { total_records: number; total_amount: number };
+  }> {
+    const books = await this.getBooks(businessId);
 
-    trackers.forEach((tracker) => {
-      trackerMap.set(tracker.book_type, {
-        current_volume: tracker.current_volume,
-        current_number: tracker.current_number,
-        records_in_volume: tracker.records_in_current_volume,
-        records_per_volume: tracker.records_per_volume,
-      });
-    });
-
-    // Initialize result with all book types (ensures all keys exist)
-    const result: Partial<Record<BookType, any>> = {};
-
-    // Type-safe iteration
-    for (const stat of stats as Array<{
-      book_type: BookType;
+    const stats = (await this.notaryRecordRepository
+      .createQueryBuilder('record')
+      .select('record.book_id', 'book_id')
+      .addSelect('COUNT(*)', 'total_records')
+      .addSelect('SUM(record.amount + record.vat_amount)', 'total_amount')
+      .where('record.business_id = :businessId', { businessId })
+      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE })
+      .groupBy('record.book_id')
+      .getRawMany()) as Array<{
+      book_id: string | null;
       total_records: string;
       total_amount: string | null;
-    }>) {
-      const bookType = stat.book_type;
-      result[bookType] = {
-        total_records: parseInt(stat.total_records, 10),
-        total_amount: parseInt(stat.total_amount || '0', 10),
-        tracker: trackerMap.get(bookType) || null,
+    }>;
+
+    const statByBook = new Map<
+      string,
+      { total_records: number; total_amount: number }
+    >();
+    for (const s of stats) {
+      if (!s.book_id) continue;
+      statByBook.set(s.book_id, {
+        total_records: parseInt(s.total_records, 10),
+        total_amount: parseInt(s.total_amount || '0', 10),
+      });
+    }
+
+    const trackers = await this.getBookTrackers(businessId);
+    const trackerByBook = new Map<string, BookTracker>();
+    trackers.forEach((t) => trackerByBook.set(t.book_id, t));
+
+    let grandRecords = 0;
+    let grandAmount = 0;
+
+    const result = books.map((book) => {
+      const s = statByBook.get(book.id) || {
+        total_records: 0,
+        total_amount: 0,
       };
-    }
+      grandRecords += s.total_records;
+      grandAmount += s.total_amount;
 
-    // Ensure all book types are represented (even those with zero records)
-    for (const bookType of Object.values(BookType)) {
-      if (!result[bookType]) {
-        result[bookType] = {
-          total_records: 0,
-          total_amount: 0,
-          tracker: trackerMap.get(bookType) || null,
-        };
-      }
-    }
+      const tracker = trackerByBook.get(book.id);
+      return {
+        book_id: book.id,
+        book_name: book.name,
+        book_slug: book.slug,
+        total_records: s.total_records,
+        total_amount: s.total_amount,
+        tracker: tracker
+          ? {
+              current_volume: tracker.current_volume,
+              current_number: tracker.current_number,
+              records_in_volume: tracker.records_in_current_volume,
+              records_per_volume: tracker.records_per_volume,
+            }
+          : null,
+      };
+    });
 
-    return result as Record<
-      BookType,
-      {
-        total_records: number;
-        total_amount: number;
-        tracker: {
-          current_volume?: string;
-          current_number: number;
-          records_in_volume: number;
-          records_per_volume: number;
-        } | null;
-      }
-    >;
+    return {
+      books: result,
+      grand_total: { total_records: grandRecords, total_amount: grandAmount },
+    };
   }
 }

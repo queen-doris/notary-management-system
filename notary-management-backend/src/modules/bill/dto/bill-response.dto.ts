@@ -5,7 +5,6 @@ import {
   BillType,
   PaymentMethod,
 } from '../../../shared/enums/bill-status.enum';
-import { BookType } from '../../../shared/enums/book-type.enum';
 import {
   MaritalStatus,
   VerificationStatus,
@@ -265,7 +264,8 @@ export class ServeBillResponseDto {
     display_number: string;
     volume: string | null;
     record_number: string;
-    book_type: BookType;
+    book_type: string;
+    book_id: string | null;
     service: string;
     amount: number;
     served_date: Date;

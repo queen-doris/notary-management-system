@@ -28,6 +28,7 @@ import { BusinessUser } from '../../shared/entities/business-user.entity';
 import { NotaryService } from '../../shared/entities/notary-service.entity';
 import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import {
   CreateBillDto,
@@ -65,7 +66,6 @@ import {
   PaymentMethod,
   PaymentStatus,
 } from '../../shared/enums/bill-status.enum';
-import { BookType } from '../../shared/enums/book-type.enum';
 import { EBusinessRole } from '../../shared/enums/business-role.enum';
 import { EUserRole } from '../../shared/enums/user-role.enum';
 import { VerificationStatus } from '../../shared/enums/client.enum';
@@ -73,6 +73,7 @@ import { RecordStatus } from '../../shared/enums/record-status.enum';
 import { BookTracker } from '../../shared/interfaces/book-tracker.interface';
 import { ProcessRefundDto } from './dto/process-refund.dto';
 import { AddItemsToBillDto } from './dto/add-items.dto';
+import { BookType } from 'src/shared/enums/book-type.enum';
 
 @Injectable()
 export class BillService {
@@ -98,6 +99,8 @@ export class BillService {
     private secretariatServiceRepository: Repository<SecretariatService>,
     @InjectRepository(NotaryRecord)
     private notaryRecordRepository: Repository<NotaryRecord>,
+    @InjectRepository(Book)
+    private bookRepository: Repository<Book>,
     @InjectRepository(Payment)
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Refund)
@@ -267,32 +270,42 @@ export class BillService {
     return item;
   }
 
+  private async getBook(businessId: string, bookId: string): Promise<Book> {
+    const book = await this.bookRepository.findOne({
+      where: { id: bookId, business_id: businessId },
+    });
+    if (!book) {
+      throw new NotFoundException(`Book "${bookId}" not found`);
+    }
+    return book;
+  }
+
   private async getBookTracker(
     businessId: string,
-    bookType: BookType,
+    bookId: string,
   ): Promise<BookTracker> {
     const tracker = (await this.dataSource
       .getRepository('book_trackers')
       .findOne({
-        where: { business_id: businessId, book_type: bookType },
+        where: { business_id: businessId, book_id: bookId },
       })) as BookTracker | null;
 
     if (!tracker) {
-      throw new NotFoundException(`Book tracker for ${bookType} not found`);
+      throw new NotFoundException(`Book tracker for ${bookId} not found`);
     }
     return tracker;
   }
 
   private async updateBookTracker(
     businessId: string,
-    bookType: BookType,
+    book: Book,
     volume: string | null,
     number: number,
   ): Promise<void> {
-    const tracker = await this.getBookTracker(businessId, bookType);
+    const tracker = await this.getBookTracker(businessId, book.id);
     tracker.current_number = number;
     if (volume) tracker.current_volume = volume;
-    if (bookType === BookType.LAND) tracker.records_in_current_volume += 1;
+    if (book.increments_volume_on_serve) tracker.records_in_current_volume += 1;
     await this.dataSource.getRepository('book_trackers').save(tracker);
   }
 
@@ -417,10 +430,11 @@ export class BillService {
           if (itemDto.service_id) {
             const catalogItem = await this.notaryServiceRepository.findOne({
               where: { id: itemDto.service_id, business_id: businessId },
+              relations: ['category'],
             });
             if (catalogItem) {
               unit_price = catalogItem.base_price ?? unit_price;
-              service_name = catalogItem.service_name;
+              service_name = catalogItem.category?.name ?? service_name;
               sub_service_name = catalogItem.sub_service;
             }
           }
@@ -877,10 +891,11 @@ export class BillService {
           if (itemDto.service_id) {
             const catalogItem = await this.notaryServiceRepository.findOne({
               where: { id: itemDto.service_id, business_id: businessId },
+              relations: ['category'],
             });
             if (catalogItem) {
               unit_price = catalogItem.base_price ?? unit_price;
-              service_name = catalogItem.service_name;
+              service_name = catalogItem.category?.name ?? service_name;
               sub_service_name = catalogItem.sub_service;
             }
           }
@@ -1357,15 +1372,17 @@ export class BillService {
     if (notaryItems.length === 0)
       throw new BadRequestException('No notary items found on this bill');
 
+    const book = await this.getBook(businessId, dto.book_id);
+
     let volume = dto.volume;
     let recordNumber = dto.record_number;
     let displayNumber: string;
 
     if (!recordNumber) {
-      const tracker = await this.getBookTracker(businessId, dto.book_type);
+      const tracker = await this.getBookTracker(businessId, book.id);
       recordNumber = tracker.current_number + 1;
       if (
-        dto.book_type === BookType.LAND &&
+        book.increments_volume_on_serve &&
         tracker.records_in_current_volume >= tracker.records_per_volume
       ) {
         volume = this.incrementRoman(tracker.current_volume || 'I');
@@ -1374,17 +1391,12 @@ export class BillService {
         volume = tracker.current_volume || '';
       }
       displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
-      await this.updateBookTracker(
-        businessId,
-        dto.book_type,
-        volume,
-        recordNumber,
-      );
+      await this.updateBookTracker(businessId, book, volume, recordNumber);
     } else {
       displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
     }
 
-    if (dto.book_type === BookType.LAND && !dto.upi && !bill.client_upi) {
+    if (book.requires_upi && !dto.upi && !bill.client_upi) {
       throw new BadRequestException(
         'UPI (Unique Parcel Identifier) is required for land records',
       );
@@ -1405,7 +1417,8 @@ export class BillService {
     }
 
     const notaryRecord = this.notaryRecordRepository.create({
-      book_type: dto.book_type,
+      book_type: book.slug,
+      book_id: book.id,
       bill_id: bill.id,
       client_id: bill.client_id,
       business_id: businessId,
@@ -1449,6 +1462,7 @@ export class BillService {
         volume: notaryRecord.volume,
         record_number: notaryRecord.record_number,
         book_type: notaryRecord.book_type,
+        book_id: notaryRecord.book_id,
         service: notaryRecord.sub_service,
         amount: notaryRecord.amount + notaryRecord.vat_amount,
         served_date: notaryRecord.served_date,
@@ -1803,9 +1817,9 @@ export class BillService {
       query.andWhere('record.served_date <= :endDate', {
         endDate: filters.end_date,
       });
-    if (filters.book_type)
-      query.andWhere('record.book_type = :bookType', {
-        bookType: filters.book_type,
+    if (filters.book_id)
+      query.andWhere('record.book_id = :bookId', {
+        bookId: filters.book_id,
       });
     if (filters.client_id)
       query.andWhere('record.client_id = :clientId', {

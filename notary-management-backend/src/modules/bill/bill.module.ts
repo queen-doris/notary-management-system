@@ -11,6 +11,7 @@ import { BusinessUser } from '../../shared/entities/business-user.entity';
 import { NotaryService } from '../../shared/entities/notary-service.entity';
 import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import { Refund } from '../../shared/entities/refund.entity';
 import { AuthModule } from '../auth/auth.module';
@@ -28,6 +29,7 @@ import { AddItemsToBillDto } from './dto/add-items.dto';
       NotaryService,
       SecretariatService,
       NotaryRecord,
+      Book,
       Payment,
       Refund,
       AddItemsToBillDto,

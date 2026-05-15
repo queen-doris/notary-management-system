@@ -15,7 +15,6 @@ import {
   BillType,
   PaymentMethod,
 } from '../../../shared/enums/bill-status.enum';
-import { BookType } from '../../../shared/enums/book-type.enum';
 
 export class ReportFiltersDto {
   @ApiPropertyOptional({ description: 'Start date (YYYY-MM-DD)' })
@@ -39,12 +38,11 @@ export class ReportFiltersDto {
   bill_type?: BillType;
 
   @ApiPropertyOptional({
-    description: 'Book type filter (for Minijust report)',
-    enum: BookType,
+    description: 'Book ID filter (for Minijust report)',
   })
   @IsOptional()
-  @IsEnum(BookType)
-  book_type?: BookType;
+  @IsUUID()
+  book_id?: string;
 
   @ApiPropertyOptional({ description: 'Client ID filter' })
   @IsOptional()

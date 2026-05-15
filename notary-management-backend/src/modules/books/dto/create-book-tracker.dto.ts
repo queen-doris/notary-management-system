@@ -7,12 +7,44 @@ import {
   MaxLength,
   IsBoolean,
 } from 'class-validator';
-import { BookType } from '../../../shared/enums/book-type.enum';
+import { VolumeFormat } from '../../../shared/enums/volume-format.enum';
 
-export class CreateBookTrackerDto {
-  @IsEnum(BookType)
-  book_type: BookType;
+export class CreateBookDto {
+  @IsString()
+  @MaxLength(50)
+  name: string;
 
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  has_volume?: boolean;
+
+  @IsOptional()
+  @IsEnum(VolumeFormat)
+  volume_format?: VolumeFormat;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  records_per_volume?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5)
+  volume_separator?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_upi?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  increments_volume_on_serve?: boolean;
+
+  // Initial tracker state (optional)
   @IsOptional()
   @IsString()
   @MaxLength(20)
@@ -26,12 +58,48 @@ export class CreateBookTrackerDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  records_per_volume?: number;
+  records_in_current_volume?: number;
+}
+
+export class UpdateBookDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  has_volume?: boolean;
+
+  @IsOptional()
+  @IsEnum(VolumeFormat)
+  volume_format?: VolumeFormat;
 
   @IsOptional()
   @IsInt()
   @Min(0)
-  records_in_current_volume?: number;
+  records_per_volume?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5)
+  volume_separator?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_upi?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  increments_volume_on_serve?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_active?: boolean;
 }
 
 export class UpdateBookTrackerDto {
@@ -62,7 +130,7 @@ export class UpdateBookTrackerDto {
 
 export class BookTrackerResponseDto {
   id: string;
-  book_type: BookType;
+  book_id: string;
   current_volume: string | null;
   current_number: number;
   records_per_volume: number;
@@ -72,7 +140,7 @@ export class BookTrackerResponseDto {
 }
 
 export class NextNumberResponseDto {
-  book_type: BookType;
+  book_id: string;
   volume: string | null;
   number: number;
   display_number: string;

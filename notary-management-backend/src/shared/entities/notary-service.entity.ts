@@ -1,18 +1,18 @@
 import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { Business } from './business.entity';
-import { BookType } from '../enums/book-type.enum';
-import { NotaryServiceName } from '../enums/notary-service-name.enum';
+import { Book } from './book.entity';
+import { NotaryServiceCategory } from './notary-service-category.entity';
 import { ServiceType } from '../enums/service-type.enum';
 import { BaseEntity } from './base.entity';
 
 @Entity('notary_services')
-@Index(['business_id', 'service_name', 'sub_service'], { unique: true })
+@Index(['business_id', 'category_id', 'sub_service'], { unique: true })
 export class NotaryService extends BaseEntity {
   @Column({ type: 'enum', enum: ServiceType, default: ServiceType.NOTARY })
   service_type: ServiceType;
 
-  @Column({ type: 'enum', enum: NotaryServiceName })
-  service_name: NotaryServiceName;
+  @Column({ type: 'uuid' })
+  category_id: string;
 
   @Column({ type: 'varchar', length: 100 })
   sub_service: string;
@@ -23,8 +23,8 @@ export class NotaryService extends BaseEntity {
   @Column({ type: 'boolean', default: true })
   has_vat: boolean;
 
-  @Column({ type: 'enum', enum: BookType, nullable: true })
-  book_type: BookType;
+  @Column({ type: 'uuid', nullable: true })
+  book_id: string | null;
 
   @Column({ type: 'boolean', default: false })
   is_custom: boolean;
@@ -41,4 +41,12 @@ export class NotaryService extends BaseEntity {
   @ManyToOne(() => Business)
   @JoinColumn({ name: 'business_id' })
   business: Business;
+
+  @ManyToOne(() => NotaryServiceCategory)
+  @JoinColumn({ name: 'category_id' })
+  category: NotaryServiceCategory;
+
+  @ManyToOne(() => Book)
+  @JoinColumn({ name: 'book_id' })
+  book: Book | null;
 }

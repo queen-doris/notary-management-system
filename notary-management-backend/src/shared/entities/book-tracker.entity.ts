@@ -4,18 +4,20 @@ import {
   ManyToOne,
   JoinColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 import { Business } from './business.entity';
-import { BookType } from '../enums/book-type.enum';
+import { Book } from './book.entity';
 import { BaseEntity } from './base.entity';
 
 @Entity('book_trackers')
+@Index(['business_id', 'book_id'], { unique: true })
 export class BookTracker extends BaseEntity {
-  @Column({ type: 'enum', enum: BookType })
-  book_type: BookType;
+  @Column({ type: 'uuid' })
+  book_id: string;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
-  current_volume?: string; // NULL for legalisation/notification
+  current_volume?: string; // NULL for books without volumes
 
   @Column({ type: 'integer', default: 0 })
   current_number: number;
@@ -38,4 +40,8 @@ export class BookTracker extends BaseEntity {
   @ManyToOne(() => Business)
   @JoinColumn({ name: 'business_id' })
   business: Business;
+
+  @ManyToOne(() => Book)
+  @JoinColumn({ name: 'book_id' })
+  book: Book;
 }

@@ -1,22 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  IsUUID,
-  IsInt,
-  Min,
-} from 'class-validator';
-import { BookType } from '../../../shared/enums/book-type.enum';
+import { IsOptional, IsString, IsUUID, IsInt, Min } from 'class-validator';
 
 export class ServeBillDto {
   @ApiProperty({ description: 'Bill ID' })
   @IsUUID()
   bill_id: string;
 
-  @ApiProperty({ description: 'Book type for the record', enum: BookType })
-  @IsEnum(BookType)
-  book_type: BookType;
+  @ApiProperty({ description: 'Book ID the record will be written into' })
+  @IsUUID()
+  book_id: string;
 
   @ApiPropertyOptional({
     description: 'Volume number (auto-generated if not provided)',
