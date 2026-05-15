@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
   PrimaryGeneratedColumn,
   Index,
+  Relation,
 } from 'typeorm';
 import { NotaryRecord } from './notary-record.entity';
 import {
@@ -96,5 +97,5 @@ export class Document {
 
   @ManyToOne(() => NotaryRecord, (record) => record.attachments)
   @JoinColumn({ name: 'record_id' })
-  record: NotaryRecord;
+  record: Relation<NotaryRecord>;
 }

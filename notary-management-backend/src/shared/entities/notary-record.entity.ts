@@ -5,6 +5,7 @@ import {
   OneToMany,
   JoinColumn,
   Index,
+  Relation,
 } from 'typeorm';
 import { Client } from './client.entity';
 import { Business } from './business.entity';
@@ -245,5 +246,5 @@ export class NotaryRecord extends BaseEntity {
   book: Book | null;
 
   @OneToMany(() => Document, (document) => document.record)
-  attachments: Document[];
+  attachments: Relation<Document[]>;
 }
