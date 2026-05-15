@@ -81,8 +81,16 @@ export const DEFAULT_NOTARY_SERVICES: DefaultNotaryServiceCategory[] = [
     name: 'Legalisation',
     slug: 'legalisation',
     sub_services: [
-      { sub_service: 'Amasezerano', base_price: 2600, book_slug: 'legalisation' },
-      { sub_service: 'Procuration', base_price: 2600, book_slug: 'legalisation' },
+      {
+        sub_service: 'Amasezerano',
+        base_price: 2600,
+        book_slug: 'legalisation',
+      },
+      {
+        sub_service: 'Procuration',
+        base_price: 2600,
+        book_slug: 'legalisation',
+      },
       { sub_service: 'Indahiro', base_price: 2600, book_slug: 'legalisation' },
       { sub_service: 'Statuts', base_price: 6500, book_slug: 'legalisation' },
       {
@@ -98,9 +106,17 @@ export const DEFAULT_NOTARY_SERVICES: DefaultNotaryServiceCategory[] = [
     sub_services: [
       { sub_service: 'Diplome', base_price: 1950, book_slug: 'notification' },
       { sub_service: 'Result', base_price: 1950, book_slug: 'notification' },
-      { sub_service: 'Transcript', base_price: 1950, book_slug: 'notification' },
+      {
+        sub_service: 'Transcript',
+        base_price: 1950,
+        book_slug: 'notification',
+      },
       { sub_service: 'Report', base_price: 1950, book_slug: 'notification' },
-      { sub_service: 'Certificate', base_price: 1950, book_slug: 'notification' },
+      {
+        sub_service: 'Certificate',
+        base_price: 1950,
+        book_slug: 'notification',
+      },
       {
         sub_service: 'Driving Licence',
         base_price: 1950,
