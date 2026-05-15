@@ -30,6 +30,9 @@ import {
   ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
+// Side-effect import: loads @types/multer's global Express.Multer
+// augmentation so `Express.Multer.File` resolves deterministically.
+import 'multer';
 import { DocumentService } from './document.service';
 import {
   UploadDocumentDto,

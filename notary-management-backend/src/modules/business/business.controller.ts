@@ -401,21 +401,14 @@ export class BusinessController {
   @ApiQuery({
     name: 'role',
     required: false,
-    enum: [
-      'waiters',
-      'generalManagers',
-      'chefs',
-      'accountants',
-      'stockManagers',
-      'bartenders',
-    ],
+    enum: EBusinessRole,
     description: 'Filter by specific business role key',
   })
   async getWorkers(
     @CurrentUser() user: User,
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
-    @Query('role') role?: string,
+    @Query('role') role?: EBusinessRole,
   ) {
     const validatedPage = Math.max(1, parseInt(page as any) || 1);
     const validatedLimit = Math.min(
