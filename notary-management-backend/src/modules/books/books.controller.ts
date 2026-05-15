@@ -10,6 +10,18 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiParam,
+  ApiQuery,
+  ApiBody,
+  ApiOkResponse,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+} from '@nestjs/swagger';
 import { BooksService } from './books.service';
 import {
   CreateBookDto,
@@ -21,20 +33,24 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuthenticatedRequest } from '../../shared/interfaces/request.interface';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { EBusinessRole } from 'src/shared/enums/business-role.enum';
-import { ApiBearerAuth } from '@nestjs/swagger/dist/decorators/api-bearer.decorator';
 
+@ApiTags('Books')
+@ApiBearerAuth('access-token')
 @Controller('books')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth('access-token')
 export class BooksController {
   constructor(private readonly booksService: BooksService) {}
 
-  /**
-   * Create a new book (+ its tracker). OWNER only.
-   */
   @Post()
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Create a book',
+    description:
+      'Creates a new book and its tracker for the business. OWNER only. Configure volume format, records-per-volume, requires_upi, etc.',
+  })
+  @ApiBody({ type: CreateBookDto })
+  @ApiCreatedResponse({ description: 'Book and tracker created' })
+  @ApiForbiddenResponse({ description: 'Requires OWNER role' })
   async createBook(
     @Req() req: AuthenticatedRequest,
     @Body() dto: CreateBookDto,
@@ -46,32 +62,41 @@ export class BooksController {
     );
   }
 
-  /**
-   * List all books for the business
-   */
   @Get()
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'List books',
+    description: 'Returns all active books for the business.',
+  })
+  @ApiOkResponse({ description: 'Books retrieved' })
   async getBooks(@Req() req: AuthenticatedRequest) {
     return this.booksService.getBooks(req.user.businessId);
   }
 
-  /**
-   * Get all book trackers for the business
-   */
   @Get('trackers')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'List book trackers',
+    description:
+      'Returns the current volume/number counter for every book in the business.',
+  })
+  @ApiOkResponse({ description: 'Book trackers retrieved' })
   async getBookTrackers(@Req() req: AuthenticatedRequest) {
     return this.booksService.getBookTrackers(req.user.businessId);
   }
 
-  /**
-   * Get a specific book tracker (by book id or slug)
-   */
   @Get('trackers/:bookRef')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Get a book tracker',
+    description: 'Returns one book tracker, resolved by book UUID or slug.',
+  })
+  @ApiParam({
+    name: 'bookRef',
+    description: 'Book UUID or slug (e.g. "land")',
+  })
+  @ApiOkResponse({ description: 'Book tracker retrieved' })
+  @ApiNotFoundResponse({ description: 'Book not found' })
   async getBookTracker(
     @Req() req: AuthenticatedRequest,
     @Param('bookRef') bookRef: string,
@@ -79,12 +104,17 @@ export class BooksController {
     return this.booksService.getBookTracker(req.user.businessId, bookRef);
   }
 
-  /**
-   * Update a book tracker (Only OWNER)
-   */
   @Put('trackers/:bookRef')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Update a book tracker',
+    description:
+      'Manually adjust a book tracker (current volume/number, records per volume). OWNER only.',
+  })
+  @ApiParam({ name: 'bookRef', description: 'Book UUID or slug' })
+  @ApiBody({ type: UpdateBookTrackerDto })
+  @ApiOkResponse({ description: 'Tracker updated' })
+  @ApiForbiddenResponse({ description: 'Requires OWNER role' })
   async updateBookTracker(
     @Req() req: AuthenticatedRequest,
     @Param('bookRef') bookRef: string,
@@ -99,12 +129,24 @@ export class BooksController {
     );
   }
 
-  /**
-   * Search records across all books
-   */
   @Get('records/search')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Search notary records',
+    description:
+      'Searches notary records across books by free text, book, client and date range.',
+  })
+  @ApiQuery({ name: 'q', required: false, description: 'Free-text search' })
+  @ApiQuery({
+    name: 'book_id',
+    required: false,
+    description: 'Filter by book UUID or slug',
+  })
+  @ApiQuery({ name: 'start_date', required: false, example: '2026-01-01' })
+  @ApiQuery({ name: 'end_date', required: false, example: '2026-12-31' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiOkResponse({ description: 'Paginated matching records' })
   async searchRecords(
     @Req() req: AuthenticatedRequest,
     @Query('q') q?: string,
@@ -124,22 +166,27 @@ export class BooksController {
     });
   }
 
-  /**
-   * Get book statistics
-   */
   @Get('stats/summary')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Book statistics',
+    description:
+      'Per-book totals (record count, amounts) plus tracker state and grand totals.',
+  })
+  @ApiOkResponse({ description: 'Statistics retrieved' })
   async getBookStatistics(@Req() req: AuthenticatedRequest) {
     return this.booksService.getBookStatistics(req.user.businessId);
   }
 
-  /**
-   * Get a single book (by id or slug)
-   */
   @Get(':bookRef')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Get a book',
+    description: 'Returns one book, resolved by UUID or slug.',
+  })
+  @ApiParam({ name: 'bookRef', description: 'Book UUID or slug' })
+  @ApiOkResponse({ description: 'Book retrieved' })
+  @ApiNotFoundResponse({ description: 'Book not found' })
   async getBook(
     @Req() req: AuthenticatedRequest,
     @Param('bookRef') bookRef: string,
@@ -147,12 +194,16 @@ export class BooksController {
     return this.booksService.getBookById(req.user.businessId, bookRef);
   }
 
-  /**
-   * Update a book (Only OWNER)
-   */
   @Put(':bookRef')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Update a book',
+    description: 'Updates a book configuration. OWNER only.',
+  })
+  @ApiParam({ name: 'bookRef', description: 'Book UUID or slug' })
+  @ApiBody({ type: UpdateBookDto })
+  @ApiOkResponse({ description: 'Book updated' })
+  @ApiForbiddenResponse({ description: 'Requires OWNER role' })
   async updateBook(
     @Req() req: AuthenticatedRequest,
     @Param('bookRef') bookRef: string,
@@ -166,12 +217,15 @@ export class BooksController {
     );
   }
 
-  /**
-   * Soft-delete a book (Only OWNER)
-   */
   @Delete(':bookRef')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Deactivate a book',
+    description: 'Soft-deletes (deactivates) a book. OWNER only.',
+  })
+  @ApiParam({ name: 'bookRef', description: 'Book UUID or slug' })
+  @ApiOkResponse({ description: 'Book deactivated' })
+  @ApiForbiddenResponse({ description: 'Requires OWNER role' })
   async deleteBook(
     @Req() req: AuthenticatedRequest,
     @Param('bookRef') bookRef: string,
@@ -183,12 +237,20 @@ export class BooksController {
     );
   }
 
-  /**
-   * Get records for a specific book (by id or slug)
-   */
   @Get(':bookRef/records')
-  @ApiBearerAuth('access-token')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'List a book’s records',
+    description:
+      'Paginated notary records written into a specific book, with optional date and client filters.',
+  })
+  @ApiParam({ name: 'bookRef', description: 'Book UUID or slug' })
+  @ApiQuery({ name: 'start_date', required: false, example: '2026-01-01' })
+  @ApiQuery({ name: 'end_date', required: false, example: '2026-12-31' })
+  @ApiQuery({ name: 'client_id', required: false })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiOkResponse({ description: 'Paginated records for the book' })
   async getBookRecords(
     @Req() req: AuthenticatedRequest,
     @Param('bookRef') bookRef: string,

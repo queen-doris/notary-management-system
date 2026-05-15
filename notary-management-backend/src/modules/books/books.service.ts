@@ -26,6 +26,14 @@ import { Generators } from '../../common/utils/generator.utils';
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export interface PaginatedResult {
+  data: unknown[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 function intToRoman(num: number): string {
   const romanMap: [number, string][] = [
     [1000, 'M'],
@@ -411,7 +419,7 @@ export class BooksService {
       page?: number;
       limit?: number;
     },
-  ): Promise<any> {
+  ): Promise<PaginatedResult> {
     const book = await this.resolveBook(businessId, bookRef);
 
     const query = this.notaryRecordRepository
@@ -516,7 +524,7 @@ export class BooksService {
       page?: number;
       limit?: number;
     },
-  ): Promise<any> {
+  ): Promise<PaginatedResult> {
     const query = this.notaryRecordRepository
       .createQueryBuilder('record')
       .leftJoinAndSelect('record.client', 'client')

@@ -24,9 +24,14 @@ import {
   ApiForbiddenResponse,
   ApiOperation,
   ApiResponse,
+  ApiOkResponse,
+  ApiParam,
+  ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
+@ApiTags('Business Users')
+@ApiBearerAuth('access-token')
 @Controller('business-users')
 export class BusinessUserController {
   constructor(private readonly businessUserService: BusinessUserService) {}
@@ -171,6 +176,12 @@ export class BusinessUserController {
   }
 
   @Get('business/:businessId')
+  @ApiOperation({
+    summary: 'List users of a business',
+    description: 'Returns all user memberships for the given business.',
+  })
+  @ApiParam({ name: 'businessId', description: 'Business UUID' })
+  @ApiOkResponse({ description: 'Business users retrieved' })
   async getBusinessUsers(@Param('businessId') businessId: string) {
     const users = await this.businessUserService.getBusinessUsers(businessId);
     return {
@@ -185,6 +196,13 @@ export class BusinessUserController {
   @UseGuards(JwtAuthGuard)
   @Roles(EUserRole.SUPERADMIN, EBusinessRole.OWNER)
   @Get('user/:userId')
+  @ApiOperation({
+    summary: 'List a user’s memberships',
+    description:
+      'Returns all business memberships for a user. SUPERADMIN or OWNER.',
+  })
+  @ApiParam({ name: 'userId', description: 'User UUID' })
+  @ApiOkResponse({ description: 'User memberships retrieved' })
   async getUserMemberships(@Param('userId') userId: string) {
     const memberships =
       await this.businessUserService.getUserMemberships(userId);
@@ -200,6 +218,14 @@ export class BusinessUserController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(EUserRole.SUPERADMIN, EBusinessRole.OWNER)
   @Patch(':id')
+  @ApiOperation({
+    summary: 'Update a business membership',
+    description:
+      'Updates a membership (roles, status, etc.). SUPERADMIN or OWNER.',
+  })
+  @ApiParam({ name: 'id', description: 'Business membership UUID' })
+  @ApiBody({ type: UpdateBusinessUserDto })
+  @ApiOkResponse({ description: 'Membership updated' })
   async update(@Param('id') id: string, @Body() dto: UpdateBusinessUserDto) {
     const membership = await this.businessUserService.updateMembership(id, dto);
     return {
