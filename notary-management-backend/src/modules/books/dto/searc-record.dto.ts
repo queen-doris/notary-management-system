@@ -1,14 +1,12 @@
 import {
   IsOptional,
   IsString,
-  IsEnum,
   IsDateString,
   IsInt,
   Min,
   Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { BookType } from '../../../shared/enums/book-type.enum';
 
 export class SearchRecordsDto {
   @IsOptional()
@@ -16,8 +14,8 @@ export class SearchRecordsDto {
   q?: string;
 
   @IsOptional()
-  @IsEnum(BookType)
-  book_type?: BookType;
+  @IsString()
+  book_id?: string;
 
   @IsOptional()
   @IsDateString()
@@ -53,7 +51,7 @@ export class SearchRecordsResponseDto {
   data: {
     id: string;
     record_number: string;
-    book_type: BookType;
+    book_type: string;
     client_name: string;
     service: string;
     amount: number;

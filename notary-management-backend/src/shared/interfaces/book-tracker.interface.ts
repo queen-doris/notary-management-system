@@ -1,8 +1,6 @@
-import { BookType } from '../enums/book-type.enum';
-
 export interface BookTracker {
   id: string;
-  book_type: BookType;
+  book_id: string;
   current_volume: string | null;
   current_number: number;
   records_per_volume: number;

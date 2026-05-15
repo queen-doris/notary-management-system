@@ -1,13 +1,17 @@
-import { IsOptional, IsDateString, IsEnum, IsBoolean } from 'class-validator';
-import { BookType } from '../../../shared/enums/book-type.enum';
+import {
+  IsOptional,
+  IsDateString,
+  IsBoolean,
+  IsUUID,
+} from 'class-validator';
 
 export class ArchiveRecordsDto {
   @IsDateString()
   before_date: string;
 
   @IsOptional()
-  @IsEnum(BookType)
-  book_type?: BookType;
+  @IsUUID()
+  book_id?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -17,6 +21,6 @@ export class ArchiveRecordsDto {
 export class ArchiveRecordsResponseDto {
   message: string;
   archived_count: number;
-  book_type?: BookType;
+  book_id?: string;
   before_date: string;
 }
