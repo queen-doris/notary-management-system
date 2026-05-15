@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable prefer-const */
 /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -29,6 +28,7 @@ import { BusinessUser } from '../../shared/entities/business-user.entity';
 import { NotaryService } from '../../shared/entities/notary-service.entity';
 import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { Document } from '../../shared/entities/document.entity';
 import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import {
@@ -1734,18 +1734,20 @@ export class BillService {
       served_by: record.served_by,
       served_date: record.served_date,
       has_documents: record.has_documents,
-      attachments: (record.attachments || []).map((a) => ({
-        id: a.id,
-        file_name: a.file_name,
-        file_url: a.file_url,
-        mime_type: a.mime_type,
-        file_size: a.file_size,
-        category: a.category,
-        description: a.description,
-        is_primary: a.is_primary,
-        uploaded_by_name: a.uploaded_by_name,
-        uploaded_at: a.uploaded_at,
-      })),
+      attachments: ((record.attachments as Document[] | undefined) ?? []).map(
+        (a: Document) => ({
+          id: a.id,
+          file_name: a.file_name,
+          file_url: a.file_url,
+          mime_type: a.mime_type,
+          file_size: a.file_size,
+          category: a.category,
+          description: a.description,
+          is_primary: a.is_primary,
+          uploaded_by_name: a.uploaded_by_name,
+          uploaded_at: a.uploaded_at,
+        }),
+      ),
     }));
 
     return {
