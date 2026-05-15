@@ -45,10 +45,7 @@ import {
   RefundStatus,
 } from '../../shared/enums/refund.enum';
 import { RefundOption, RejectBillDto } from './dto/reject-bill.dto';
-import {
-  ServeBillDto,
-  ServePreviewResponseDto,
-} from './dto/serve-bill.dto';
+import { ServeBillDto, ServePreviewResponseDto } from './dto/serve-bill.dto';
 import { ReportFiltersDto, ReportGroupBy } from './dto/report-filters.dto';
 import {
   BillResponseDto,
@@ -1382,10 +1379,7 @@ export class BillService {
   // ==================== Serve Bill (Create Notary Record) ====================
 
   /** Bills in these statuses may be served into a notary record. */
-  private readonly SERVABLE_STATUSES = [
-    BillStatus.PAID,
-    BillStatus.REJECTED,
-  ];
+  private readonly SERVABLE_STATUSES = [BillStatus.PAID, BillStatus.REJECTED];
 
   /**
    * Compute the next volume/number for a book WITHOUT mutating the tracker.
@@ -1853,9 +1847,7 @@ export class BillService {
     query
       .andWhere('item.item_type = :itemType', { itemType })
       .andWhere('bill.status IN (:...statuses)', {
-        statuses: filters.status
-          ? [filters.status]
-          : this.REVENUE_STATUSES,
+        statuses: filters.status ? [filters.status] : this.REVENUE_STATUSES,
       });
     if (filters.start_date)
       query.andWhere('bill.createdAt >= :startDate', {
@@ -2110,9 +2102,7 @@ export class BillService {
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId })
       .andWhere('bill.status IN (:...statuses)', {
-        statuses: filters.status
-          ? [filters.status]
-          : this.REVENUE_STATUSES,
+        statuses: filters.status ? [filters.status] : this.REVENUE_STATUSES,
       });
     if (filters.start_date)
       q.andWhere('bill.createdAt >= :sd', { sd: filters.start_date });
@@ -2196,15 +2186,13 @@ export class BillService {
     const summary: FinancialReportSummaryDto = {
       total_bills: notary.summary.total_bills + secretariat.summary.total_bills,
       total_notary_revenue: notary.summary.total_notary_revenue,
-      total_secretariat_revenue:
-        secretariat.summary.total_secretariat_revenue,
+      total_secretariat_revenue: secretariat.summary.total_secretariat_revenue,
       total_vat_collected: notary.summary.total_vat_collected,
       gross_revenue:
         notary.summary.gross_revenue + secretariat.summary.gross_revenue,
       total_refunds:
         notary.summary.total_refunds + secretariat.summary.total_refunds,
-      net_revenue:
-        notary.summary.net_revenue + secretariat.summary.net_revenue,
+      net_revenue: notary.summary.net_revenue + secretariat.summary.net_revenue,
     };
     return {
       period,
@@ -2226,9 +2214,7 @@ export class BillService {
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId })
       .andWhere('bill.status IN (:...statuses)', {
-        statuses: filters.status
-          ? [filters.status]
-          : this.REVENUE_STATUSES,
+        statuses: filters.status ? [filters.status] : this.REVENUE_STATUSES,
       });
 
     if (filters.start_date)
