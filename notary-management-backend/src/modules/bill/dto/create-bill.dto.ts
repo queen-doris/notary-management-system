@@ -45,13 +45,15 @@ export class NotaryServiceItemDto {
   @Min(1)
   quantity: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
-      'Unit price in RWF (auto-filled from catalog if service_id provided)',
+      'Unit price in RWF. Optional: when service_id is provided the price is auto-set from the catalog. Required only when no service_id is given.',
+    minimum: 1,
   })
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  unit_price: number;
+  unit_price?: number;
 
   @ApiPropertyOptional({
     description: 'Additional notes for this service item',
@@ -86,13 +88,15 @@ export class SecretariatServiceItemDto {
   @Min(1)
   quantity: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     description:
-      'Unit price in RWF (auto-filled from catalog if service_id provided)',
+      'Unit price in RWF. Optional: when service_id is provided the price is auto-set from the catalog. Required only when no service_id is given.',
+    minimum: 1,
   })
+  @IsOptional()
   @IsInt()
   @IsPositive()
-  unit_price: number;
+  unit_price?: number;
 
   @ApiPropertyOptional({
     description: 'Additional notes for this service item',

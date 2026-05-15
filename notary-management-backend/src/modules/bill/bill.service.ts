@@ -445,11 +445,20 @@ export class BillService {
               where: { id: itemDto.service_id, business_id: businessId },
               relations: ['category'],
             });
-            if (catalogItem) {
-              unit_price = catalogItem.base_price ?? unit_price;
-              service_name = catalogItem.category?.name ?? service_name;
-              sub_service_name = catalogItem.sub_service;
+            if (!catalogItem) {
+              throw new NotFoundException(
+                `Notary service "${itemDto.service_id}" not found`,
+              );
             }
+            // Catalog price is authoritative when set.
+            unit_price = catalogItem.base_price ?? unit_price;
+            service_name = catalogItem.category?.name ?? service_name;
+            sub_service_name = catalogItem.sub_service;
+          }
+          if (unit_price == null || unit_price <= 0) {
+            throw new BadRequestException(
+              'unit_price is required: the selected service has no preset price, or no service_id was provided',
+            );
           }
           const { subtotal, vatAmount, total } = this.calculateItemTotals(
             unit_price,
@@ -478,12 +487,24 @@ export class BillService {
 
       if (dto.secretariat_items?.length) {
         for (const itemDto of dto.secretariat_items) {
-          let { unit_price, service_name } = itemDto;
+          let { unit_price } = itemDto;
+          const { service_name } = itemDto;
           if (itemDto.service_id) {
             const catalogItem = await this.secretariatServiceRepository.findOne(
               { where: { id: itemDto.service_id, business_id: businessId } },
             );
-            if (catalogItem) unit_price = catalogItem.base_price ?? unit_price;
+            if (!catalogItem) {
+              throw new NotFoundException(
+                `Secretariat service "${itemDto.service_id}" not found`,
+              );
+            }
+            // Catalog price is authoritative when set.
+            unit_price = catalogItem.base_price ?? unit_price;
+          }
+          if (unit_price == null || unit_price <= 0) {
+            throw new BadRequestException(
+              'unit_price is required: the selected service has no preset price, or no service_id was provided',
+            );
           }
           const { subtotal, total } = this.calculateItemTotals(
             unit_price,
@@ -928,11 +949,20 @@ export class BillService {
               where: { id: itemDto.service_id, business_id: businessId },
               relations: ['category'],
             });
-            if (catalogItem) {
-              unit_price = catalogItem.base_price ?? unit_price;
-              service_name = catalogItem.category?.name ?? service_name;
-              sub_service_name = catalogItem.sub_service;
+            if (!catalogItem) {
+              throw new NotFoundException(
+                `Notary service "${itemDto.service_id}" not found`,
+              );
             }
+            // Catalog price is authoritative when set.
+            unit_price = catalogItem.base_price ?? unit_price;
+            service_name = catalogItem.category?.name ?? service_name;
+            sub_service_name = catalogItem.sub_service;
+          }
+          if (unit_price == null || unit_price <= 0) {
+            throw new BadRequestException(
+              'unit_price is required: the selected service has no preset price, or no service_id was provided',
+            );
           }
           const { subtotal, vatAmount, total } = this.calculateItemTotals(
             unit_price,
@@ -962,12 +992,24 @@ export class BillService {
       // Process new secretariat items
       if (dto.secretariat_items?.length) {
         for (const itemDto of dto.secretariat_items) {
-          let { unit_price, service_name } = itemDto;
+          let { unit_price } = itemDto;
+          const { service_name } = itemDto;
           if (itemDto.service_id) {
             const catalogItem = await this.secretariatServiceRepository.findOne(
               { where: { id: itemDto.service_id, business_id: businessId } },
             );
-            if (catalogItem) unit_price = catalogItem.base_price ?? unit_price;
+            if (!catalogItem) {
+              throw new NotFoundException(
+                `Secretariat service "${itemDto.service_id}" not found`,
+              );
+            }
+            // Catalog price is authoritative when set.
+            unit_price = catalogItem.base_price ?? unit_price;
+          }
+          if (unit_price == null || unit_price <= 0) {
+            throw new BadRequestException(
+              'unit_price is required: the selected service has no preset price, or no service_id was provided',
+            );
           }
           const { subtotal, total } = this.calculateItemTotals(
             unit_price,
