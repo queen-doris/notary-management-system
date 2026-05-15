@@ -94,7 +94,7 @@ export class Document {
   @UpdateDateColumn()
   updated_at: Date;
 
-  @ManyToOne(() => NotaryRecord)
+  @ManyToOne(() => NotaryRecord, (record) => record.attachments)
   @JoinColumn({ name: 'record_id' })
   record: NotaryRecord;
 }

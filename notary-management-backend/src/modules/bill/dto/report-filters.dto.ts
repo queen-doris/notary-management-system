@@ -16,6 +16,13 @@ import {
   PaymentMethod,
 } from '../../../shared/enums/bill-status.enum';
 
+export enum ReportGroupBy {
+  DAY = 'day',
+  MONTH = 'month',
+  QUARTER = 'quarter',
+  YEAR = 'year',
+}
+
 export class ReportFiltersDto {
   @ApiPropertyOptional({ description: 'Start date (YYYY-MM-DD)' })
   @IsOptional()
@@ -88,9 +95,11 @@ export class ReportFiltersDto {
   limit?: number = 50;
 
   @ApiPropertyOptional({
-    description: 'Group by period (day, month, quarter, year)',
+    description:
+      'Group results by period. Combine with start_date/end_date for custom ranges.',
+    enum: ReportGroupBy,
   })
   @IsOptional()
-  @IsString()
-  group_by?: 'day' | 'month' | 'quarter' | 'year';
+  @IsEnum(ReportGroupBy)
+  group_by?: ReportGroupBy;
 }

@@ -1,8 +1,16 @@
-import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
+import {
+  Entity,
+  Column,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+  Index,
+} from 'typeorm';
 import { Client } from './client.entity';
 import { Business } from './business.entity';
 import { Bill } from './bill.entity';
 import { Book } from './book.entity';
+import { Document } from './document.entity';
 import { RecordStatus } from '../enums/record-status.enum';
 import { MaritalStatus, VerificationStatus } from '../enums/client.enum';
 import { BaseEntity } from './base.entity';
@@ -49,11 +57,21 @@ export class NotaryRecord extends BaseEntity {
   @Column({ type: 'varchar', length: 100, name: 'sub_service' })
   sub_service: string;
 
+  // `amount` is the line subtotal (unit_price * quantity, pre-VAT).
   @Column({ type: 'integer', name: 'amount' })
   amount: number;
 
   @Column({ type: 'integer', default: 0, name: 'vat_amount' })
   vat_amount: number;
+
+  @Column({ type: 'integer', nullable: true, name: 'quantity' })
+  quantity: number | null;
+
+  @Column({ type: 'integer', nullable: true, name: 'unit_price' })
+  unit_price: number | null;
+
+  @Column({ type: 'integer', nullable: true, name: 'grand_total' })
+  grand_total: number | null;
 
   // ============================================
   // Client Information (Denormalized - captured at service time)
@@ -225,4 +243,7 @@ export class NotaryRecord extends BaseEntity {
   @ManyToOne(() => Book)
   @JoinColumn({ name: 'book_id' })
   book: Book | null;
+
+  @OneToMany(() => Document, (document) => document.record)
+  attachments: Document[];
 }

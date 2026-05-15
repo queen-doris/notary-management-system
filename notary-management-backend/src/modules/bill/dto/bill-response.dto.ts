@@ -292,33 +292,36 @@ export class PaymentHistoryResponseDto {
   payments: PaymentDto[] = [];
 }
 
+/**
+ * Minijust (Ministry of Justice) report row.
+ * Field order is fixed by the official format:
+ * date, book type, volume, number, client full name, client id,
+ * sub-service, service name.
+ */
 export class MinijustReportRecordDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Served date' })
   date!: Date;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Book type (slug)' })
   book_type!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Book volume', nullable: true })
   volume!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Record number (display_number or number)' })
   number!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Client full name' })
   client_full_name!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Client national ID number' })
   client_id_number!: string;
 
-  @ApiProperty()
-  service_name!: string;
-
-  @ApiProperty()
+  @ApiProperty({ description: 'Sub-service' })
   sub_service_name!: string;
 
-  //   @ApiProperty()
-  //   amount: number;
+  @ApiProperty({ description: 'Service (category) name' })
+  service_name!: string;
 }
 
 export class MinijustReportDto {
@@ -339,22 +342,36 @@ export class MinijustReportDto {
 }
 
 export class FinancialReportSummaryDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Number of bills in scope' })
   total_bills!: number;
 
-  @ApiProperty()
+  @ApiProperty({
+    description: 'Gross notary revenue before refunds',
+  })
   total_notary_revenue!: number;
 
-  @ApiProperty()
+  @ApiProperty({
+    description: 'Gross secretariat revenue before refunds',
+  })
   total_secretariat_revenue!: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'VAT collected (notary only)' })
   total_vat_collected!: number;
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'Gross revenue before refunds (notary + secretariat, VAT-inclusive)',
+  })
+  gross_revenue!: number;
+
+  @ApiProperty({
+    description: 'Total refunds applied within scope',
+  })
   total_refunds!: number;
 
-  @ApiProperty()
+  @ApiProperty({
+    description: 'Net revenue = gross_revenue − total_refunds',
+  })
   net_revenue!: number;
 }
 
@@ -460,6 +477,12 @@ export class FinancialReportDto {
     string,
     { count: number; amount: number }
   >;
+
+  @ApiPropertyOptional({
+    description:
+      'Per-period buckets (keyed by group_by) with gross/net revenue.',
+  })
+  breakdown_by_period?: Record<string, { gross: number; net: number }>;
 }
 
 export class RejectBillResponseDto {
@@ -490,18 +513,32 @@ export class DailySalesReportDto {
     end_date: string;
   };
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'All revenue figures are NET of refunds. gross/refunds/net reconcile: net = gross − refunds.',
+  })
   summary!: {
     total_bills: number;
-    total_revenue: number;
-    total_notary_revenue: number;
-    total_secretariat_revenue: number;
+    gross_revenue: number;
+    total_refunds: number;
+    total_revenue: number; // net (= gross − refunds)
+    total_notary_revenue: number; // net
+    total_secretariat_revenue: number; // net
     total_vat: number;
     average_bill_value: number;
   };
 
   @ApiProperty()
   payment_method_breakdown!: Record<string, { amount: number; count: number; }>;
+
+  @ApiPropertyOptional({
+    description:
+      'Per-period buckets (keyed by group_by) with gross/refunds/net.',
+  })
+  breakdown_by_period?: Record<
+    string,
+    { gross: number; refunds: number; net: number }
+  >;
 
   @ApiProperty()
   transactions: Array<{
@@ -514,4 +551,64 @@ export class DailySalesReportDto {
     vat: number;
     date: Date;
   }> = [];
+}
+
+export class RecordAttachmentDto {
+  @ApiProperty() id: string;
+  @ApiProperty() file_name: string;
+  @ApiProperty() file_url: string;
+  @ApiProperty() mime_type: string;
+  @ApiProperty() file_size: number;
+  @ApiProperty() category: string;
+  @ApiPropertyOptional() description?: string;
+  @ApiProperty() is_primary: boolean;
+  @ApiProperty() uploaded_by_name: string;
+  @ApiProperty() uploaded_at: Date;
+}
+
+export class NotaryRecordResponseDto {
+  @ApiProperty() id: string;
+  @ApiProperty() bill_id: string;
+  @ApiProperty() book_id: string | null;
+  @ApiProperty() book_type: string;
+  @ApiProperty({ nullable: true }) volume: string | null;
+  @ApiProperty() record_number: string;
+  @ApiProperty() display_number: string;
+
+  @ApiProperty({ description: 'Service category (parent) name' })
+  service_category: string;
+
+  @ApiProperty({ description: 'Sub-service name' })
+  sub_service: string;
+
+  @ApiProperty({ description: 'Quantity recorded', nullable: true })
+  quantity: number | null;
+
+  @ApiProperty({ description: 'Unit price (RWF)', nullable: true })
+  unit_price: number | null;
+
+  @ApiProperty({ description: 'Line subtotal (pre-VAT)' })
+  subtotal: number;
+
+  @ApiProperty({ description: 'VAT amount' })
+  vat_amount: number;
+
+  @ApiProperty({ description: 'Grand total (subtotal + VAT)', nullable: true })
+  grand_total: number | null;
+
+  @ApiPropertyOptional() upi?: string;
+
+  @ApiProperty() client_full_name: string;
+  @ApiProperty() client_id_number: string;
+  @ApiPropertyOptional() client_phone?: string;
+
+  @ApiProperty({ enum: BillStatus, required: false })
+  status: string;
+
+  @ApiProperty() served_by: string;
+  @ApiProperty() served_date: Date;
+  @ApiProperty() has_documents: boolean;
+
+  @ApiProperty({ type: [RecordAttachmentDto] })
+  attachments: RecordAttachmentDto[] = [];
 }

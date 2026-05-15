@@ -206,6 +206,14 @@ export class RegisterBusinessDto {
   vatRegistered?: boolean;
 
   @ApiProperty({
+    example: true,
+    description:
+      'Whether this notary office also offers secretariat services. If false, no secretariat services are seeded and all secretariat bill items, reports, and endpoints are disabled for this business.',
+  })
+  @IsBoolean()
+  has_secretariat: boolean;
+
+  @ApiProperty({
     example: 'HP-2024-00789',
     description: 'Health permit number',
     required: false,

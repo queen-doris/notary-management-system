@@ -31,7 +31,10 @@ import { CreateBillDto } from './dto/create-bill.dto';
 import { UpdateBillStatusDto } from './dto/update-bill-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { RejectBillDto } from './dto/reject-bill.dto';
-import { ServeBillDto } from './dto/serve-bill.dto';
+import {
+  ServeBillDto,
+  ServePreviewResponseDto,
+} from './dto/serve-bill.dto';
 import { ReportFiltersDto } from './dto/report-filters.dto';
 import {
   BillResponseDto,
@@ -355,18 +358,56 @@ VAT is automatically calculated for NOTARY items.
 
   // ==================== Serve Bill (Create Notary Record) ====================
 
+  @Get('serve-preview/:billId')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Preview serving a bill (step 1 of 2)',
+    description:
+      'Returns the suggested book volume, next record number and UPI for the owner to confirm or edit before the notary record is created. Performs NO writes — the book tracker is not advanced. Bill must be PAID or REJECTED and carry exactly one notary sub-service.',
+  })
+  @ApiParam({ name: 'billId', description: 'Bill UUID', type: 'string' })
+  @ApiQuery({
+    name: 'bookId',
+    description: 'Target book UUID the record will be written into',
+    type: 'string',
+  })
+  @ApiOkResponse({ type: ServePreviewResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Bill not servable or has no notary item',
+  })
+  @ApiConflictResponse({
+    description: 'A notary record already exists for this bill',
+  })
+  async getServePreview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('billId', ParseUUIDPipe) billId: string,
+    @Query('bookId', ParseUUIDPipe) bookId: string,
+  ): Promise<ServePreviewResponseDto> {
+    return this.billService.getServePreview(
+      user.id,
+      user.businessId,
+      billId,
+      bookId,
+    );
+  }
+
   @Post('serve')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
-    summary: 'Serve a bill',
+    summary: 'Serve a bill (step 2 of 2)',
     description:
-      'Marks a bill as served and creates a notary record. Only notary bills can be served.',
+      'Creates the notary record from the confirmed (optionally edited) volume/number/UPI. Only the NOTARY part of the bill becomes a record. Bill must be PAID or REJECTED. Idempotent: returns 409 if the bill already has a notary record.',
   })
   @ApiBody({ type: ServeBillDto })
-  @ApiOkResponse({
+  @ApiCreatedResponse({
     description: 'Bill served successfully. Notary record created.',
   })
-  @ApiBadRequestResponse({ description: 'Invalid serve data or bill not paid' })
+  @ApiBadRequestResponse({
+    description: 'Invalid serve data, bill not servable, or UPI required',
+  })
+  @ApiConflictResponse({
+    description: 'A notary record already exists for this bill',
+  })
   async serveBill(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ServeBillDto,
@@ -456,24 +497,6 @@ VAT is automatically calculated for NOTARY items.
     });
   }
 
-  @Get('pending/notary')
-  @Roles(EBusinessRole.OWNER)
-  @ApiOperation({
-    summary: 'Get paid bills for notary',
-    description: 'Retrieves all paid notary bills awaiting service',
-  })
-  @ApiOkResponse({ description: 'Paid bills retrieved successfully' })
-  async getPaidBillsForNotary(
-    @CurrentUser() user: AuthenticatedUser,
-  ): Promise<PaginatedResponseDto> {
-    return this.billService.getBills(user.businessId, {
-      status: BillStatus.PAID,
-      bill_type: BillType.NOTARY,
-      page: 1,
-      limit: 100,
-    });
-  }
-
   // ==================== Add Items to Bill ====================
 
   @Post('add-items')
@@ -503,9 +526,12 @@ VAT is automatically calculated for NOTARY items.
   @Get('pending/notary')
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
-    summary: 'Get pending notary bills',
-    description: 'Returns paid bills awaiting notary service.',
+    summary: 'Get pending notary bills (owner only)',
+    description:
+      'Returns PAID notary/BOTH bills that are awaiting service. Only the notary (owner) can see these.',
   })
+  @ApiOkResponse({ description: 'Pending notary bills retrieved' })
+  @ApiForbiddenResponse({ description: 'Requires OWNER role' })
   async getPendingNotaryBills(@CurrentUser() user: AuthenticatedUser) {
     return this.billService.getPendingNotaryBills(user.businessId);
   }
@@ -591,7 +617,10 @@ VAT is automatically calculated for NOTARY items.
   @ApiOperation({
     summary: 'Generate secretariat financial report',
     description:
-      'Returns detailed secretariat financial report with all transactions.',
+      'Returns detailed secretariat financial report. All amounts are NET of refunds (gross/refunds/net reconcile). Supports date range, group_by (day/month/quarter/year), client, payment method and service name filters. Returns 403 if the business does not offer secretariat services.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Business does not offer secretariat services',
   })
   async getSecretariatFinancialReport(
     @CurrentUser() user: AuthenticatedUser,

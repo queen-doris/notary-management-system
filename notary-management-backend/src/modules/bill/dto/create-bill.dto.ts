@@ -9,6 +9,7 @@ import {
   IsString,
   IsEnum,
   IsPositive,
+  ArrayMaxSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BillType } from '../../../shared/enums/bill-status.enum';
@@ -116,10 +117,16 @@ export class CreateBillDto {
   bill_type: BillType;
 
   @ApiPropertyOptional({
-    description: 'Notary service items (if bill_type is NOTARY or BOTH)',
+    description:
+      'Notary service items (if bill_type is NOTARY or BOTH). A bill may carry AT MOST ONE notary sub-service; use quantity for multiples of the same sub-service.',
+    type: [NotaryServiceItemDto],
+    maxItems: 1,
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(1, {
+    message: 'A bill may carry at most one notary sub-service',
+  })
   @ValidateNested({ each: true })
   @Type(() => NotaryServiceItemDto)
   notary_items?: NotaryServiceItemDto[];

@@ -117,10 +117,12 @@ export class BusinessService {
     await this.booksService.initializeBusinessBooks(savedBusiness.id);
     // Initialize notary services (with all sub-services)
     await this.notaryServiceService.initializeDefaultServices(savedBusiness.id);
-    // Initialize secretariat services
-    await this.secretariatServiceService.initializeDefaultServices(
-      savedBusiness.id,
-    );
+    // Initialize secretariat services only if this business offers them
+    if (savedBusiness.has_secretariat) {
+      await this.secretariatServiceService.initializeDefaultServices(
+        savedBusiness.id,
+      );
+    }
 
     return {
       status: 'SUCCESS',
@@ -135,6 +137,7 @@ export class BusinessService {
           email: savedBusiness.email,
           isActive: savedBusiness.isActive,
           isVerified: savedBusiness.isVerified,
+          has_secretariat: savedBusiness.has_secretariat,
         },
         businessOwner: {
           id: owner.id,

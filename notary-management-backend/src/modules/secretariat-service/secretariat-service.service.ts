@@ -27,6 +27,21 @@ export class SecretariatServiceService {
     private businessRepository: Repository<Business>,
   ) {}
 
+  /**
+   * Throws 403 if the business does not offer secretariat services.
+   */
+  private async assertSecretariatEnabled(businessId: string): Promise<void> {
+    const business = await this.businessRepository.findOne({
+      where: { id: businessId },
+    });
+    if (!business) throw new NotFoundException('Business not found');
+    if (!business.has_secretariat) {
+      throw new ForbiddenException(
+        'This business does not offer secretariat services',
+      );
+    }
+  }
+
   async initializeDefaultServices(
     businessId: string,
   ): Promise<SecretariatService[]> {
@@ -58,6 +73,7 @@ export class SecretariatServiceService {
   }
 
   async getAllServices(businessId: string): Promise<SecretariatService[]> {
+    await this.assertSecretariatEnabled(businessId);
     return this.secretariatServiceRepository.find({
       where: { business_id: businessId, is_active: true },
       order: { service_name: 'ASC' },
@@ -68,6 +84,7 @@ export class SecretariatServiceService {
     id: string,
     businessId: string,
   ): Promise<SecretariatService> {
+    await this.assertSecretariatEnabled(businessId);
     const service = await this.secretariatServiceRepository.findOne({
       where: { id, business_id: businessId },
     });
@@ -79,6 +96,7 @@ export class SecretariatServiceService {
     businessId: string,
     serviceName: SecretariatServiceName,
   ): Promise<SecretariatService> {
+    await this.assertSecretariatEnabled(businessId);
     const service = await this.secretariatServiceRepository.findOne({
       where: {
         business_id: businessId,
@@ -99,6 +117,7 @@ export class SecretariatServiceService {
     userRoles: EBusinessRole,
     dto: CreateSecretariatServiceDto,
   ): Promise<SecretariatService> {
+    await this.assertSecretariatEnabled(businessId);
     const isOwner =
       userRoles === (EBusinessRole.OWNER || EBusinessRole.SECRETARIAT);
     if (!isOwner)

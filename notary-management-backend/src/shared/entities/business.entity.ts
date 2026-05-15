@@ -118,6 +118,12 @@ export class Business extends BaseEntity {
   @Column({ type: 'boolean', default: false })
   isVerified: boolean;
 
+  // Whether this notary office also offers secretariat services.
+  // Defaults to true so existing businesses keep working; new
+  // registrations set it explicitly.
+  @Column({ type: 'boolean', default: true })
+  has_secretariat: boolean;
+
   @Column({ type: 'text', nullable: true })
   description?: string;
 

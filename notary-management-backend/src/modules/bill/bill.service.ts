@@ -45,8 +45,11 @@ import {
   RefundStatus,
 } from '../../shared/enums/refund.enum';
 import { RefundOption, RejectBillDto } from './dto/reject-bill.dto';
-import { ServeBillDto } from './dto/serve-bill.dto';
-import { ReportFiltersDto } from './dto/report-filters.dto';
+import {
+  ServeBillDto,
+  ServePreviewResponseDto,
+} from './dto/serve-bill.dto';
+import { ReportFiltersDto, ReportGroupBy } from './dto/report-filters.dto';
 import {
   BillResponseDto,
   PaginatedResponseDto,
@@ -417,6 +420,18 @@ export class BillService {
       });
       if (!business)
         throw new NotFoundException('Business not found or inactive');
+
+      if (dto.secretariat_items?.length && !business.has_secretariat) {
+        throw new ForbiddenException(
+          'This business does not offer secretariat services',
+        );
+      }
+
+      if ((dto.notary_items?.length ?? 0) > 1) {
+        throw new BadRequestException(
+          'A bill may carry at most one notary sub-service',
+        );
+      }
 
       let notarySubtotal = 0,
         notaryVat = 0,
@@ -876,6 +891,28 @@ export class BillService {
           ],
           'add secretariat items to bill',
         );
+      }
+
+      if (dto.secretariat_items?.length) {
+        const business = await this.businessRepository.findOne({
+          where: { id: businessId },
+        });
+        if (!business?.has_secretariat) {
+          throw new ForbiddenException(
+            'This business does not offer secretariat services',
+          );
+        }
+      }
+
+      if (dto.notary_items?.length) {
+        const existingNotaryCount = await this.billItemRepository.count({
+          where: { bill_id: bill.id, item_type: ItemType.NOTARY },
+        });
+        if (existingNotaryCount + dto.notary_items.length > 1) {
+          throw new BadRequestException(
+            'A bill may carry at most one notary sub-service',
+          );
+        }
       }
 
       let notarySubtotal = bill.notary_subtotal;
@@ -1344,6 +1381,114 @@ export class BillService {
 
   // ==================== Serve Bill (Create Notary Record) ====================
 
+  /** Bills in these statuses may be served into a notary record. */
+  private readonly SERVABLE_STATUSES = [
+    BillStatus.PAID,
+    BillStatus.REJECTED,
+  ];
+
+  /**
+   * Compute the next volume/number for a book WITHOUT mutating the tracker.
+   * Mirrors the roll-over rule used when actually serving.
+   */
+  private async previewNextNumber(
+    businessId: string,
+    book: Book,
+  ): Promise<{ volume: string; recordNumber: number; displayNumber: string }> {
+    const tracker = await this.getBookTracker(businessId, book.id);
+    let recordNumber = tracker.current_number + 1;
+    let volume = tracker.current_volume || '';
+    if (
+      book.increments_volume_on_serve &&
+      tracker.records_per_volume > 0 &&
+      tracker.records_in_current_volume >= tracker.records_per_volume
+    ) {
+      volume = this.incrementRoman(tracker.current_volume || 'I');
+      recordNumber = 1;
+    }
+    const displayNumber = volume
+      ? `${recordNumber}/${volume}`
+      : `${recordNumber}`;
+    return { volume, recordNumber, displayNumber };
+  }
+
+  private async loadServableBill(billId: string, businessId: string) {
+    const bill = await this.billRepository.findOne({
+      where: { id: billId, business_id: businessId },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (!this.SERVABLE_STATUSES.includes(bill.status))
+      throw new BadRequestException(
+        'Only PAID or REJECTED bills can be served',
+      );
+    if (bill.notary_total === 0)
+      throw new BadRequestException(
+        'This bill has no notary services to serve',
+      );
+    const notaryItems = await this.billItemRepository.find({
+      where: { bill_id: bill.id, item_type: ItemType.NOTARY },
+    });
+    if (notaryItems.length === 0)
+      throw new BadRequestException('No notary items found on this bill');
+    return { bill, notaryItem: notaryItems[0] };
+  }
+
+  /**
+   * Step 1 of serving: returns the suggested book volume/number/UPI for
+   * the owner to confirm or edit. Performs NO writes (tracker untouched).
+   */
+  async getServePreview(
+    userId: string,
+    businessId: string,
+    billId: string,
+    bookId: string,
+  ): Promise<ServePreviewResponseDto> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER],
+      'serve bills',
+    );
+    const { bill, notaryItem } = await this.loadServableBill(
+      billId,
+      businessId,
+    );
+    const existing = await this.notaryRecordRepository.findOne({
+      where: { bill_id: bill.id },
+    });
+    if (existing)
+      throw new ConflictException(
+        'A notary record already exists for this bill',
+      );
+
+    const book = await this.getBook(businessId, bookId);
+    const next = await this.previewNextNumber(businessId, book);
+
+    return {
+      bill_id: bill.id,
+      book_id: book.id,
+      book_name: book.name,
+      suggested_volume: next.volume || null,
+      suggested_record_number: next.recordNumber,
+      suggested_display_number: next.displayNumber,
+      suggested_upi: bill.client_upi || null,
+      requires_upi: book.requires_upi,
+      notary_item: {
+        service_name: notaryItem.service_name,
+        sub_service_name: notaryItem.sub_service_name,
+        quantity: notaryItem.quantity,
+        unit_price: notaryItem.unit_price,
+        subtotal: notaryItem.subtotal,
+        vat_amount: notaryItem.vat_amount,
+        grand_total: notaryItem.total,
+      },
+    };
+  }
+
+  /**
+   * Step 2 of serving: creates the notary record from the (optionally
+   * edited) confirmed values. Idempotent — 409 if already served.
+   */
   async serveBill(
     userId: string,
     businessId: string,
@@ -1356,63 +1501,47 @@ export class BillService {
       'serve bills',
     );
 
-    const bill = await this.billRepository.findOne({
-      where: { id: dto.bill_id, business_id: businessId },
-    });
-    if (!bill) throw new NotFoundException('Bill not found');
-    if (bill.status !== BillStatus.PAID)
-      throw new BadRequestException('Only paid bills can be served');
-    if (bill.notary_total === 0)
-      throw new BadRequestException(
-        'This bill has no notary services to serve',
-      );
+    const { bill, notaryItem } = await this.loadServableBill(
+      dto.bill_id,
+      businessId,
+    );
 
-    const notaryItems = await this.billItemRepository.find({
-      where: { bill_id: bill.id, item_type: ItemType.NOTARY },
+    const existing = await this.notaryRecordRepository.findOne({
+      where: { bill_id: bill.id },
     });
-    if (notaryItems.length === 0)
-      throw new BadRequestException('No notary items found on this bill');
+    if (existing)
+      throw new ConflictException(
+        'A notary record already exists for this bill',
+      );
 
     const book = await this.getBook(businessId, dto.book_id);
 
-    let volume = dto.volume;
-    let recordNumber = dto.record_number;
-    let displayNumber: string;
-
-    if (!recordNumber) {
-      const tracker = await this.getBookTracker(businessId, book.id);
-      recordNumber = tracker.current_number + 1;
-      if (
-        book.increments_volume_on_serve &&
-        tracker.records_in_current_volume >= tracker.records_per_volume
-      ) {
-        volume = this.incrementRoman(tracker.current_volume || 'I');
-        recordNumber = 1;
-      } else {
-        volume = tracker.current_volume || '';
-      }
-      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
-      await this.updateBookTracker(businessId, book, volume, recordNumber);
-    } else {
-      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
-    }
-
     if (book.requires_upi && !dto.upi && !bill.client_upi) {
       throw new BadRequestException(
-        'UPI (Unique Parcel Identifier) is required for land records',
+        'UPI (Unique Parcel Identifier) is required for this book',
       );
     }
 
-    const firstItem = notaryItems[0];
-    const userInfo = await this.getUserInfo(userId, businessId);
+    // Use the confirmed values if supplied, otherwise compute & advance.
+    let volume: string;
+    let recordNumber: number;
+    let displayNumber: string;
+    if (dto.record_number) {
+      recordNumber = dto.record_number;
+      volume = dto.volume || '';
+      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
+      await this.updateBookTracker(businessId, book, volume, recordNumber);
+    } else {
+      const next = await this.previewNextNumber(businessId, book);
+      recordNumber = next.recordNumber;
+      volume = dto.volume ?? next.volume;
+      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
+      await this.updateBookTracker(businessId, book, volume, recordNumber);
+    }
 
     const businessUser = await this.businessUserRepository.findOne({
-      where: {
-        userId: userId,
-        businessId: businessId,
-      },
+      where: { userId: userId, businessId: businessId },
     });
-
     if (!businessUser) {
       throw new NotFoundException('Business user not found');
     }
@@ -1426,10 +1555,13 @@ export class BillService {
       volume: volume || null,
       record_number: recordNumber.toString(),
       display_number: displayNumber,
-      service_category: firstItem.service_name,
-      sub_service: firstItem.sub_service_name,
-      amount: firstItem.subtotal,
-      vat_amount: firstItem.vat_amount,
+      service_category: notaryItem.service_name,
+      sub_service: notaryItem.sub_service_name,
+      amount: notaryItem.subtotal,
+      vat_amount: notaryItem.vat_amount,
+      quantity: notaryItem.quantity,
+      unit_price: notaryItem.unit_price,
+      grand_total: notaryItem.total,
       upi: dto.upi || bill.client_upi,
       notary_notes: dto.notary_notes,
       served_by: businessUser.id,
@@ -1548,7 +1680,8 @@ export class BillService {
     );
     const query = this.notaryRecordRepository
       .createQueryBuilder('record')
-      .where('record.business_id = :businessId', { id: businessId })
+      .leftJoinAndSelect('record.attachments', 'attachments')
+      .where('record.business_id = :businessId', { businessId })
       .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
 
     if (filters.book_type) {
@@ -1582,19 +1715,43 @@ export class BillService {
 
     const formattedData = data.map((record) => ({
       id: record.id,
-      record_number: record.display_number,
-      volume: record.volume,
+      bill_id: record.bill_id,
+      book_id: record.book_id,
       book_type: record.book_type,
+      volume: record.volume,
+      record_number: record.record_number,
+      display_number: record.display_number,
       client_name: record.client_full_name,
+      client_full_name: record.client_full_name,
       client_id_number: record.client_id_number,
+      client_phone: record.client_phone,
       service_name: record.service_category,
+      service_category: record.service_category,
+      sub_service: record.sub_service,
       sub_service_name: record.sub_service,
-      amount: record.amount,
+      quantity: record.quantity,
+      unit_price: record.unit_price,
+      subtotal: record.amount,
       vat_amount: record.vat_amount,
+      grand_total: record.grand_total ?? record.amount + record.vat_amount,
       total: record.amount + record.vat_amount,
       upi: record.upi,
+      status: record.status,
+      served_by: record.served_by,
       served_date: record.served_date,
       has_documents: record.has_documents,
+      attachments: (record.attachments || []).map((a) => ({
+        id: a.id,
+        file_name: a.file_name,
+        file_url: a.file_url,
+        mime_type: a.mime_type,
+        file_size: a.file_size,
+        category: a.category,
+        description: a.description,
+        is_primary: a.is_primary,
+        uploaded_by_name: a.uploaded_by_name,
+        uploaded_at: a.uploaded_at,
+      })),
     }));
 
     return {
@@ -1636,65 +1793,144 @@ export class BillService {
 
   // ==================== Reports ====================
 
+  /**
+   * Bills that count toward revenue. A bill contributes its realized
+   * payments; refunds are netted out separately so revenue is accurate.
+   */
+  private readonly REVENUE_STATUSES = [
+    BillStatus.PARTIALLY_PAID,
+    BillStatus.PAID,
+    BillStatus.SERVED,
+    BillStatus.REFUNDED,
+  ];
+
+  /** Total refund applied to a bill (0 unless a refund was processed). */
+  private billRefundAmount(bill: Bill): number {
+    return bill.amount_refunded || 0;
+  }
+
+  /**
+   * Allocate a bill's refund proportionally to one segment
+   * (notary or secretariat) by its share of grand_total.
+   * Guards grand_total = 0.
+   */
+  private segmentRefund(bill: Bill, segmentTotal: number): number {
+    const refund = this.billRefundAmount(bill);
+    if (refund <= 0 || !bill.grand_total) return 0;
+    return Math.round(refund * (segmentTotal / bill.grand_total));
+  }
+
+  /** Period bucket key for group_by aggregation. */
+  private periodBucket(date: Date, groupBy?: ReportGroupBy): string {
+    const d = new Date(date);
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    switch (groupBy) {
+      case ReportGroupBy.YEAR:
+        return `${y}`;
+      case ReportGroupBy.QUARTER:
+        return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+      case ReportGroupBy.MONTH:
+        return `${y}-${pad(m)}`;
+      case ReportGroupBy.DAY:
+        return `${y}-${pad(m)}-${pad(d.getDate())}`;
+      default:
+        return 'all';
+    }
+  }
+
+  /**
+   * Shared filter application for item-level financial reports.
+   * Statuses default to REVENUE_STATUSES (so SERVED/REFUNDED bills are
+   * still counted and netted), or the explicit status filter if given.
+   */
+  private applyItemReportFilters(
+    query: import('typeorm').SelectQueryBuilder<BillItem>,
+    filters: ReportFiltersDto,
+    itemType: ItemType,
+  ) {
+    query
+      .andWhere('item.item_type = :itemType', { itemType })
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: filters.status
+          ? [filters.status]
+          : this.REVENUE_STATUSES,
+      });
+    if (filters.start_date)
+      query.andWhere('bill.createdAt >= :startDate', {
+        startDate: filters.start_date,
+      });
+    if (filters.end_date)
+      query.andWhere('bill.createdAt <= :endDate', {
+        endDate: filters.end_date,
+      });
+    if (filters.client_id)
+      query.andWhere('bill.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    if (filters.client_name)
+      query.andWhere('bill.client_full_name ILIKE :clientName', {
+        clientName: `%${filters.client_name}%`,
+      });
+    if (filters.service_name)
+      query.andWhere('item.service_name ILIKE :serviceName', {
+        serviceName: `%${filters.service_name}%`,
+      });
+    if (filters.payment_method)
+      query.andWhere(
+        'EXISTS (SELECT 1 FROM payments p WHERE p.bill_id = bill.id AND p.method = :paymentMethod)',
+        { paymentMethod: filters.payment_method },
+      );
+    return query;
+  }
+
   async getNotaryFinancialReport(
     businessId: string,
     filters: ReportFiltersDto,
   ): Promise<{
     summary: FinancialReportSummaryDto;
     records: NotaryFinancialRecordDto[];
+    breakdown_by_period: Record<string, { gross: number; net: number }>;
   }> {
     const query = this.billItemRepository
       .createQueryBuilder('item')
       .innerJoin('item.bill', 'bill')
-      .where('bill.business_id = :businessId', { businessId })
-      .andWhere('item.item_type = :itemType', { itemType: ItemType.NOTARY })
-      .andWhere('bill.status IN (:...statuses)', {
-        statuses: [BillStatus.PAID, BillStatus.REFUNDED, BillStatus.SERVED],
-      });
-
-    if (filters.start_date) {
-      query.andWhere('bill.createdAt >= :startDate', {
-        startDate: filters.start_date,
-      });
-    }
-    if (filters.end_date) {
-      query.andWhere('bill.createdAt <= :endDate', {
-        endDate: filters.end_date,
-      });
-    }
-    if (filters.client_id) {
-      query.andWhere('bill.client_id = :clientId', {
-        clientId: filters.client_id,
-      });
-    }
-    if (filters.client_name) {
-      query.andWhere('bill.client_full_name ILIKE :clientName', {
-        clientName: `%${filters.client_name}%`,
-      });
-    }
+      .where('bill.business_id = :businessId', { businessId });
+    this.applyItemReportFilters(query, filters, ItemType.NOTARY);
 
     const items = await query.getMany();
 
     const records: NotaryFinancialRecordDto[] = [];
-    let totalSubtotal = 0;
-    let totalVat = 0;
-    let totalGrand = 0;
+    const periods: Record<string, { gross: number; net: number }> = {};
+    const billIds = new Set<string>();
+    let grossSubtotal = 0;
+    let grossVat = 0;
+    let grossTotal = 0;
     let totalRefunded = 0;
 
     for (const item of items) {
       const bill = item.bill;
+      billIds.add(bill.id);
       const isRefunded = bill.status === BillStatus.REFUNDED;
-      const amountRefunded = bill.amount_refunded || 0;
 
-      // Calculate refund amount proportionally for this item
-      const itemRatio = item.total / bill.grand_total;
-      const itemRefundedAmount = amountRefunded * itemRatio;
-      const amountAfterRefund = item.total - itemRefundedAmount;
+      // Proportional refund for THIS item by its share of the bill.
+      const itemRefund = bill.grand_total
+        ? Math.round(
+            this.billRefundAmount(bill) * (item.total / bill.grand_total),
+          )
+        : 0;
+      const amountAfterRefund = item.total - itemRefund;
 
-      totalSubtotal += item.subtotal;
-      totalVat += item.vat_amount;
-      totalGrand += item.total;
-      totalRefunded += itemRefundedAmount;
+      grossSubtotal += item.subtotal;
+      grossVat += item.vat_amount;
+      grossTotal += item.total;
+      totalRefunded += itemRefund;
+
+      const bucket = this.periodBucket(bill.createdAt, filters.group_by);
+      periods[bucket] = periods[bucket] || { gross: 0, net: 0 };
+      periods[bucket].gross += item.total;
+      periods[bucket].net += amountAfterRefund;
 
       records.push({
         date: bill.createdAt,
@@ -1708,7 +1944,7 @@ export class BillService {
         vat: item.vat_amount,
         grand_total: item.total,
         is_refunded: isRefunded,
-        amount_refunded: itemRefundedAmount,
+        amount_refunded: itemRefund,
         amount_after_refund: amountAfterRefund,
         bill_number: bill.bill_number,
         bill_status: bill.status,
@@ -1716,15 +1952,16 @@ export class BillService {
     }
 
     const summary: FinancialReportSummaryDto = {
-      total_bills: items.length,
-      total_notary_revenue: totalGrand,
+      total_bills: billIds.size,
+      total_notary_revenue: grossTotal,
       total_secretariat_revenue: 0,
-      total_vat_collected: totalVat,
+      total_vat_collected: grossVat,
+      gross_revenue: grossTotal,
       total_refunds: totalRefunded,
-      net_revenue: totalGrand - totalRefunded,
+      net_revenue: grossTotal - totalRefunded,
     };
 
-    return { summary, records };
+    return { summary, records, breakdown_by_period: periods };
   }
 
   async getSecretariatFinancialReport(
@@ -1733,47 +1970,49 @@ export class BillService {
   ): Promise<{
     summary: FinancialReportSummaryDto;
     records: SecretariatFinancialRecordDto[];
+    breakdown_by_period: Record<string, { gross: number; net: number }>;
   }> {
+    const business = await this.businessRepository.findOne({
+      where: { id: businessId },
+    });
+    if (!business?.has_secretariat) {
+      throw new ForbiddenException(
+        'This business does not offer secretariat services',
+      );
+    }
+
     const query = this.billItemRepository
       .createQueryBuilder('item')
       .innerJoin('item.bill', 'bill')
-      .where('bill.business_id = :businessId', { businessId })
-      .andWhere('item.item_type = :itemType', {
-        itemType: ItemType.SECRETARIAT,
-      })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID });
-
-    if (filters.start_date) {
-      query.andWhere('bill.createdAt >= :startDate', {
-        startDate: filters.start_date,
-      });
-    }
-    if (filters.end_date) {
-      query.andWhere('bill.createdAt <= :endDate', {
-        endDate: filters.end_date,
-      });
-    }
-    if (filters.client_id) {
-      query.andWhere('bill.client_id = :clientId', {
-        clientId: filters.client_id,
-      });
-    }
-    if (filters.client_name) {
-      query.andWhere('bill.client_full_name ILIKE :clientName', {
-        clientName: `%${filters.client_name}%`,
-      });
-    }
+      .where('bill.business_id = :businessId', { businessId });
+    this.applyItemReportFilters(query, filters, ItemType.SECRETARIAT);
 
     const items = await query.getMany();
 
     const records: SecretariatFinancialRecordDto[] = [];
-    let totalSubtotal = 0;
-    let totalGrand = 0;
+    const periods: Record<string, { gross: number; net: number }> = {};
+    const billIds = new Set<string>();
+    let grossTotal = 0;
+    let totalRefunded = 0;
 
     for (const item of items) {
       const bill = item.bill;
-      totalSubtotal += item.subtotal;
-      totalGrand += item.total;
+      billIds.add(bill.id);
+
+      // Proportional refund for THIS secretariat item (fixes the prior
+      // bug where refunded BOTH bills were dropped entirely).
+      const itemRefund = bill.grand_total
+        ? Math.round(
+            this.billRefundAmount(bill) * (item.total / bill.grand_total),
+          )
+        : 0;
+      grossTotal += item.total;
+      totalRefunded += itemRefund;
+
+      const bucket = this.periodBucket(bill.createdAt, filters.group_by);
+      periods[bucket] = periods[bucket] || { gross: 0, net: 0 };
+      periods[bucket].gross += item.total;
+      periods[bucket].net += item.total - itemRefund;
 
       records.push({
         date: bill.createdAt,
@@ -1790,15 +2029,16 @@ export class BillService {
     }
 
     const summary: FinancialReportSummaryDto = {
-      total_bills: items.length,
+      total_bills: billIds.size,
       total_notary_revenue: 0,
-      total_secretariat_revenue: totalGrand,
+      total_secretariat_revenue: grossTotal,
       total_vat_collected: 0,
-      total_refunds: 0,
-      net_revenue: totalGrand,
+      gross_revenue: grossTotal,
+      total_refunds: totalRefunded,
+      net_revenue: grossTotal - totalRefunded,
     };
 
-    return { summary, records };
+    return { summary, records, breakdown_by_period: periods };
   }
 
   async getMinijustReport(
@@ -1845,10 +2085,72 @@ export class BillService {
         number: r.display_number || r.record_number,
         client_full_name: r.client_full_name,
         client_id_number: r.client_id_number,
-        service_name: r.service_category,
         sub_service_name: r.sub_service,
+        service_name: r.service_category,
       })),
       total_records: records.length,
+    };
+  }
+
+  /**
+   * Status + payment-method breakdowns over revenue bills in scope.
+   * Amounts are NET (grand_total − amount_refunded).
+   */
+  private async getBillBreakdowns(
+    businessId: string,
+    filters: ReportFiltersDto,
+  ): Promise<{
+    breakdown_by_status: Record<string, { count: number; amount: number }>;
+    breakdown_by_payment_method: Record<
+      string,
+      { count: number; amount: number }
+    >;
+  }> {
+    const q = this.billRepository
+      .createQueryBuilder('bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: filters.status
+          ? [filters.status]
+          : this.REVENUE_STATUSES,
+      });
+    if (filters.start_date)
+      q.andWhere('bill.createdAt >= :sd', { sd: filters.start_date });
+    if (filters.end_date)
+      q.andWhere('bill.createdAt <= :ed', { ed: filters.end_date });
+    const bills = await q.getMany();
+
+    const byStatus: Record<string, { count: number; amount: number }> = {};
+    for (const b of bills) {
+      const net = b.grand_total - (b.amount_refunded || 0);
+      byStatus[b.status] = byStatus[b.status] || { count: 0, amount: 0 };
+      byStatus[b.status].count += 1;
+      byStatus[b.status].amount += net;
+    }
+
+    const pmRaw = (await this.paymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.bill', 'bill')
+      .select('payment.method', 'method')
+      .addSelect('SUM(payment.amount)', 'amount')
+      .addSelect('COUNT(DISTINCT payment.bill_id)', 'count')
+      .where('bill.business_id = :businessId', { businessId })
+      .groupBy('payment.method')
+      .getRawMany()) as Array<{
+      method: string;
+      amount: string | null;
+      count: string;
+    }>;
+    const byPayment: Record<string, { count: number; amount: number }> = {};
+    for (const r of pmRaw)
+      byPayment[r.method] = {
+        count: parseInt(r.count, 10),
+        amount: parseInt(r.amount || '0', 10),
+      };
+
+    return {
+      breakdown_by_status: byStatus,
+      breakdown_by_payment_method: byPayment,
     };
   }
 
@@ -1857,39 +2159,63 @@ export class BillService {
     filters: ReportFiltersDto,
     bill_type: BillType,
   ): Promise<FinancialReportDto> {
+    const period = {
+      start_date: filters.start_date || 'all',
+      end_date: filters.end_date || 'all',
+    };
+    const breakdowns = await this.getBillBreakdowns(businessId, filters);
+
     if (bill_type === BillType.NOTARY) {
       const { summary, records } = await this.getNotaryFinancialReport(
         businessId,
         filters,
       );
-      return {
-        period: {
-          start_date: filters.start_date || 'all',
-          end_date: filters.end_date || 'all',
-        },
-        type: BillType.NOTARY,
-        summary,
-        records: records,
-        breakdown_by_status: {},
-        breakdown_by_payment_method: {},
-      };
-    } else {
+      return { period, type: BillType.NOTARY, summary, records, ...breakdowns };
+    }
+
+    if (bill_type === BillType.SECRETARIAT) {
       const { summary, records } = await this.getSecretariatFinancialReport(
         businessId,
         filters,
       );
       return {
-        period: {
-          start_date: filters.start_date || 'all',
-          end_date: filters.end_date || 'all',
-        },
+        period,
         type: BillType.SECRETARIAT,
         summary,
-        records: records,
-        breakdown_by_status: {},
-        breakdown_by_payment_method: {},
+        records,
+        ...breakdowns,
       };
     }
+
+    // BOTH — combined notary + secretariat, net of refunds.
+    const notary = await this.getNotaryFinancialReport(businessId, filters);
+    const secretariat = await this.getSecretariatFinancialReport(
+      businessId,
+      filters,
+    );
+    const summary: FinancialReportSummaryDto = {
+      total_bills: notary.summary.total_bills + secretariat.summary.total_bills,
+      total_notary_revenue: notary.summary.total_notary_revenue,
+      total_secretariat_revenue:
+        secretariat.summary.total_secretariat_revenue,
+      total_vat_collected: notary.summary.total_vat_collected,
+      gross_revenue:
+        notary.summary.gross_revenue + secretariat.summary.gross_revenue,
+      total_refunds:
+        notary.summary.total_refunds + secretariat.summary.total_refunds,
+      net_revenue:
+        notary.summary.net_revenue + secretariat.summary.net_revenue,
+    };
+    return {
+      period,
+      type: BillType.BOTH,
+      summary,
+      records: [
+        ...notary.records,
+        ...secretariat.records,
+      ] as NotaryFinancialRecordDto[],
+      ...breakdowns,
+    };
   }
 
   async getDailySalesReport(
@@ -1899,7 +2225,11 @@ export class BillService {
     const query = this.billRepository
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId })
-      .andWhere('bill.status = :status', { status: BillStatus.PAID });
+      .andWhere('bill.status IN (:...statuses)', {
+        statuses: filters.status
+          ? [filters.status]
+          : this.REVENUE_STATUSES,
+      });
 
     if (filters.start_date)
       query.andWhere('bill.createdAt >= :startDate', {
@@ -1912,17 +2242,37 @@ export class BillService {
 
     const bills = await query.orderBy('bill.createdAt', 'DESC').getMany();
 
-    let totalNotaryRevenue = 0;
-    let totalSecretariatRevenue = 0;
+    let grossRevenue = 0;
+    let totalRefunds = 0;
+    let netNotaryRevenue = 0;
+    let netSecretariatRevenue = 0;
     let totalVat = 0;
+    const periods: Record<
+      string,
+      { gross: number; refunds: number; net: number }
+    > = {};
 
     for (const bill of bills) {
-      totalNotaryRevenue += bill.notary_total;
-      totalSecretariatRevenue += bill.secretariat_total;
+      const refund = this.billRefundAmount(bill);
+      const notaryRefund = this.segmentRefund(bill, bill.notary_total);
+      const secretariatRefund = this.segmentRefund(
+        bill,
+        bill.secretariat_total,
+      );
+      grossRevenue += bill.grand_total;
+      totalRefunds += refund;
+      netNotaryRevenue += bill.notary_total - notaryRefund;
+      netSecretariatRevenue += bill.secretariat_total - secretariatRefund;
       totalVat += bill.notary_vat;
+
+      const bucket = this.periodBucket(bill.createdAt, filters.group_by);
+      periods[bucket] = periods[bucket] || { gross: 0, refunds: 0, net: 0 };
+      periods[bucket].gross += bill.grand_total;
+      periods[bucket].refunds += refund;
+      periods[bucket].net += bill.grand_total - refund;
     }
 
-    const totalRevenue = totalNotaryRevenue + totalSecretariatRevenue;
+    const netRevenue = grossRevenue - totalRefunds;
 
     interface PaymentBreakdownRaw {
       method: PaymentMethod;
@@ -1958,23 +2308,30 @@ export class BillService {
       },
       summary: {
         total_bills: bills.length,
-        total_revenue: totalRevenue,
-        total_notary_revenue: totalNotaryRevenue,
-        total_secretariat_revenue: totalSecretariatRevenue,
+        gross_revenue: grossRevenue,
+        total_refunds: totalRefunds,
+        total_revenue: netRevenue,
+        total_notary_revenue: netNotaryRevenue,
+        total_secretariat_revenue: netSecretariatRevenue,
         total_vat: totalVat,
-        average_bill_value: bills.length ? totalRevenue / bills.length : 0,
+        average_bill_value: bills.length ? netRevenue / bills.length : 0,
       },
       payment_method_breakdown: paymentMethodBreakdown,
-      transactions: bills.map((b) => ({
-        id: b.id,
-        bill_number: b.bill_number,
-        client_name: b.client_full_name,
-        notary_amount: b.notary_total,
-        secretariat_amount: b.secretariat_total,
-        total: b.grand_total,
-        vat: b.notary_vat,
-        date: b.createdAt,
-      })),
+      breakdown_by_period: periods,
+      transactions: bills.map((b) => {
+        const refund = this.billRefundAmount(b);
+        return {
+          id: b.id,
+          bill_number: b.bill_number,
+          client_name: b.client_full_name,
+          notary_amount: b.notary_total - this.segmentRefund(b, b.notary_total),
+          secretariat_amount:
+            b.secretariat_total - this.segmentRefund(b, b.secretariat_total),
+          total: b.grand_total - refund,
+          vat: b.notary_vat,
+          date: b.createdAt,
+        };
+      }),
     };
   }
 
