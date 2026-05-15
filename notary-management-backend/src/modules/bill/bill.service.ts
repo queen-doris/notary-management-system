@@ -1427,6 +1427,24 @@ export class BillService {
     return { bill, notaryItem: notaryItems[0] };
   }
 
+  /** Category/book slugs that are land-related and always need a UPI. */
+  private readonly LAND_SLUGS = ['ubutaka', 'land'];
+
+  /**
+   * A serve is UPI-required if the target book is flagged requires_upi,
+   * OR the book/notary service is land-related (Ubutaka/Land) regardless
+   * of book config. Land records must always carry their own UPI.
+   */
+  private isUpiRequired(book: Book, notaryItem: BillItem): boolean {
+    const bookSlug = (book.slug || '').toLowerCase();
+    const serviceName = (notaryItem.service_name || '').toLowerCase();
+    return (
+      book.requires_upi ||
+      this.LAND_SLUGS.includes(bookSlug) ||
+      this.LAND_SLUGS.some((s) => serviceName.includes(s))
+    );
+  }
+
   /**
    * Step 1 of serving: returns the suggested book volume/number/UPI for
    * the owner to confirm or edit. Performs NO writes (tracker untouched).
@@ -1466,7 +1484,7 @@ export class BillService {
       suggested_record_number: next.recordNumber,
       suggested_display_number: next.displayNumber,
       suggested_upi: bill.client_upi || null,
-      requires_upi: book.requires_upi,
+      requires_upi: this.isUpiRequired(book, notaryItem),
       notary_item: {
         service_name: notaryItem.service_name,
         sub_service_name: notaryItem.sub_service_name,
@@ -1510,9 +1528,9 @@ export class BillService {
 
     const book = await this.getBook(businessId, dto.book_id);
 
-    if (book.requires_upi && !dto.upi && !bill.client_upi) {
+    if (this.isUpiRequired(book, notaryItem) && !dto.upi) {
       throw new BadRequestException(
-        'UPI (Unique Parcel Identifier) is required for this book',
+        'UPI (Unique Parcel Identifier) must be provided for land-related records, even if the client has a UPI on file',
       );
     }
 
