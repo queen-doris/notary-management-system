@@ -11,9 +11,21 @@ import {
 import { DocumentCategory } from '../../../shared/enums/document-status.enum';
 
 export class UploadDocumentDto {
-  @ApiProperty({ description: 'Record ID to attach document to' })
+  @ApiPropertyOptional({
+    description:
+      'Notary record ID to attach to. Provide this OR secretariat_record_id (exactly one).',
+  })
+  @IsOptional()
   @IsUUID()
-  record_id: string;
+  record_id?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Secretariat record ID to attach to. Provide this OR record_id (exactly one).',
+  })
+  @IsOptional()
+  @IsUUID()
+  secretariat_record_id?: string;
 
   @ApiProperty({
     description: 'File to upload (multipart/form-data)',

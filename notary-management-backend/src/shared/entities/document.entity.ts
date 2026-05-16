@@ -10,6 +10,7 @@ import {
   Relation,
 } from 'typeorm';
 import { NotaryRecord } from './notary-record.entity';
+import { SecretariatRecord } from './secretariat-record.entity';
 import {
   DocumentStatus,
   DocumentCategory,
@@ -25,8 +26,14 @@ export class Document {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'uuid' })
-  record_id: string;
+  // A document attaches to EITHER a notary record (record_id) or a
+  // secretariat record (secretariat_record_id) — exactly one is set.
+  @Column({ type: 'uuid', nullable: true })
+  record_id: string | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  secretariat_record_id: string | null;
 
   @Column({ type: 'varchar', length: 255 })
   file_name: string;
@@ -95,7 +102,17 @@ export class Document {
   @UpdateDateColumn()
   updated_at: Date;
 
-  @ManyToOne(() => NotaryRecord, (record) => record.attachments)
+  @ManyToOne(() => NotaryRecord, (record) => record.attachments, {
+    nullable: true,
+  })
   @JoinColumn({ name: 'record_id' })
-  record: Relation<NotaryRecord>;
+  record: Relation<NotaryRecord> | null;
+
+  @ManyToOne(
+    () => SecretariatRecord,
+    (record) => record.attachments,
+    { nullable: true },
+  )
+  @JoinColumn({ name: 'secretariat_record_id' })
+  secretariat_record: Relation<SecretariatRecord> | null;
 }

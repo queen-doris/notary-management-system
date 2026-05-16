@@ -53,6 +53,7 @@ import {
 import { UpdateBillStatusDto } from './dto/update-bill-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { Refund } from '../../shared/entities/refund.entity';
+import { AuditLog } from '../../shared/entities/audit-log.entity';
 import {
   RefundRequestStatus,
   RefundType,
@@ -123,6 +124,8 @@ export class BillService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(Refund)
     private refundRepository: Repository<Refund>,
+    @InjectRepository(AuditLog)
+    private auditLogRepository: Repository<AuditLog>,
     private dataSource: DataSource,
   ) {}
 
@@ -1360,6 +1363,19 @@ export class BillService {
     await this.billRepository.save(bill);
 
     const remaining = refund.requested_amount - newActual;
+    await this.writeAudit(
+      businessId,
+      userId,
+      'PROCESS_REFUND',
+      'refund',
+      refund.id,
+      {
+        bill_id: bill.id,
+        amount_this_time: dto.amount,
+        total_refunded: newActual,
+        fully_refunded: fullyRefunded,
+      },
+    );
     return {
       message: fullyRefunded
         ? 'Refund fully processed'
@@ -1789,6 +1805,19 @@ export class BillService {
       return notaryRecord;
     });
 
+    await this.writeAudit(
+      businessId,
+      userId,
+      'SERVE_NOTARY',
+      'notary_record',
+      result.id,
+      {
+        bill_id: bill.id,
+        display_number: result.display_number,
+        book_id: result.book_id,
+      },
+    );
+
     return {
       message: 'Bill served successfully. Notary record created.',
       notary_record: {
@@ -2133,6 +2162,36 @@ export class BillService {
     };
   }
 
+  /** Append-only audit trail write (best-effort; never blocks the op). */
+  private async writeAudit(
+    businessId: string,
+    userId: string | null,
+    action: string,
+    entity: string,
+    entityId: string | null,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.auditLogRepository.save(
+        this.auditLogRepository.create({
+          business_id: businessId,
+          user_id: userId,
+          action,
+          entity,
+          entity_id: entityId,
+          details,
+        }),
+      );
+    } catch (e) {
+      this.logger.error(`Audit write failed: ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * A served notary record is a legal instrument: only annotation
+   * fields may be amended; the book, number, volume, amounts and client
+   * identity are immutable. Every edit is audited.
+   */
   async updateNotaryRecord(
     recordId: string,
     businessId: string,
@@ -2155,8 +2214,35 @@ export class BillService {
       throw new NotFoundException('Notary record not found');
     }
 
-    Object.assign(record, dto);
+    const AMENDABLE = ['notary_notes', 'document_description'];
+    const requested = Object.keys(dto);
+    const forbidden = requested.filter((k) => !AMENDABLE.includes(k));
+    if (forbidden.length) {
+      throw new BadRequestException(
+        `A notary record is legally immutable. Only ${AMENDABLE.join(
+          ', ',
+        )} may be amended; rejected fields: ${forbidden.join(', ')}`,
+      );
+    }
+
+    const before: Record<string, unknown> = {};
+    for (const k of AMENDABLE) {
+      if (k in dto) {
+        before[k] = (record as unknown as Record<string, unknown>)[k];
+        (record as unknown as Record<string, unknown>)[k] = (
+          dto as unknown as Record<string, unknown>
+        )[k];
+      }
+    }
     await this.notaryRecordRepository.save(record);
+    await this.writeAudit(
+      businessId,
+      userId,
+      'UPDATE_NOTARY_RECORD',
+      'notary_record',
+      record.id,
+      { before, after: dto },
+    );
 
     return record;
   }

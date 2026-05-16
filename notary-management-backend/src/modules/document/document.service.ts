@@ -10,9 +10,10 @@ import {
   InternalServerErrorException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Not } from 'typeorm';
+import { Repository, Not, DataSource } from 'typeorm';
 import { Document } from '../../shared/entities/document.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { SecretariatRecord } from '../../shared/entities/secretariat-record.entity';
 import { User } from '../../shared/entities/user.entity';
 import { BusinessUser } from '../../shared/entities/business-user.entity';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
@@ -45,11 +46,14 @@ export class DocumentService {
     private documentRepository: Repository<Document>,
     @InjectRepository(NotaryRecord)
     private notaryRecordRepository: Repository<NotaryRecord>,
+    @InjectRepository(SecretariatRecord)
+    private secretariatRecordRepository: Repository<SecretariatRecord>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
     @InjectRepository(BusinessUser)
     private businessUserRepository: Repository<BusinessUser>,
     private cloudinaryService: CloudinaryService,
+    private dataSource: DataSource,
   ) {}
 
   /**
@@ -118,13 +122,41 @@ export class DocumentService {
       userBusinessRoles,
     );
 
-    // Verify record exists
-    const record = await this.notaryRecordRepository.findOne({
-      where: { id: dto.record_id, business_id: businessId },
-    });
-    if (!record) {
+    // A document attaches to EITHER a notary or a secretariat record.
+    if (!dto.record_id === !dto.secretariat_record_id) {
+      throw new BadRequestException(
+        'Provide exactly one of record_id or secretariat_record_id',
+      );
+    }
+    const isSecretariat = !!dto.secretariat_record_id;
+    const notaryRec = isSecretariat
+      ? null
+      : await this.notaryRecordRepository.findOne({
+          where: { id: dto.record_id, business_id: businessId },
+        });
+    const secRec = isSecretariat
+      ? await this.secretariatRecordRepository.findOne({
+          where: {
+            id: dto.secretariat_record_id,
+            business_id: businessId,
+          },
+        })
+      : null;
+    if (!notaryRec && !secRec) {
       throw new NotFoundException('Record not found');
     }
+    // Normalised view used for denormalised document fields.
+    const record = {
+      id: notaryRec?.id ?? null,
+      secId: secRec?.id ?? null,
+      client_full_name:
+        notaryRec?.client_full_name ?? secRec?.client_full_name ?? '',
+      client_id_number:
+        notaryRec?.client_id_number ?? secRec?.client_id_number ?? '',
+      display_number: notaryRec?.display_number ?? null,
+      book_type: notaryRec?.book_type ?? 'secretariat',
+      upi: notaryRec?.upi ?? null,
+    };
 
     // Validate file
     if (!file) {
@@ -166,13 +198,16 @@ export class DocumentService {
     const isPrimary = dto.is_primary || false;
     if (isPrimary) {
       await this.documentRepository.update(
-        { record_id: record.id, is_primary: true },
+        record.secId
+          ? { secretariat_record_id: record.secId, is_primary: true }
+          : { record_id: record.id ?? undefined, is_primary: true },
         { is_primary: false },
       );
     }
 
     const document = this.documentRepository.create({
       record_id: record.id,
+      secretariat_record_id: record.secId,
       file_name: file.originalname,
       file_url: uploadResult.secure_url,
       public_id: uploadResult.public_id,
@@ -180,24 +215,43 @@ export class DocumentService {
       mime_type: file.mimetype,
       category: dto.category || DocumentCategory.OTHER,
       description: dto.description,
-      upi: dto.upi || record.upi,
+      upi: dto.upi || record.upi || undefined,
       is_primary: isPrimary,
       status: DocumentStatus.UPLOADED,
       client_name: record.client_full_name,
       client_id_number: record.client_id_number,
-      record_display_number: record.display_number,
+      record_display_number: record.display_number ?? undefined,
       book_type: record.book_type,
       uploaded_by: userId,
       uploaded_by_name: userInfo.name,
       uploaded_by_role: userInfo.role,
     });
 
-    await this.documentRepository.save(document);
-
-    // Update record's has_documents flag
-    await this.notaryRecordRepository.update(record.id, {
-      has_documents: true,
-    });
+    // Persist the row + flag atomically. If the DB write fails, delete
+    // the just-uploaded Cloudinary asset so it isn't orphaned.
+    try {
+      await this.dataSource.transaction(async (m) => {
+        await m.save(document);
+        if (record.secId) {
+          await m.update(SecretariatRecord, record.secId, {
+            has_documents: true,
+          });
+        } else if (record.id) {
+          await m.update(NotaryRecord, record.id, { has_documents: true });
+        }
+      });
+    } catch (err) {
+      try {
+        await this.cloudinaryService.deleteFile(uploadResult.public_id);
+      } catch {
+        this.logger.error(
+          `Orphaned Cloudinary asset ${uploadResult.public_id} (DB save failed and cleanup failed)`,
+        );
+      }
+      const e = err as Error;
+      this.logger.error(`Document DB save failed: ${e.message}`);
+      throw new InternalServerErrorException('Failed to save document');
+    }
 
     return {
       message: 'Document uploaded successfully',
@@ -357,14 +411,16 @@ export class DocumentService {
   ): Promise<DocumentResponseDto> {
     const document = await this.documentRepository.findOne({
       where: { id: documentId },
-      relations: ['record'],
+      relations: ['record', 'secretariat_record'],
     });
 
     if (!document) {
       throw new NotFoundException('Document not found');
     }
 
-    if (document.record?.business_id !== businessId) {
+    const ownerBusinessId =
+      document.record?.business_id ?? document.secretariat_record?.business_id;
+    if (ownerBusinessId !== businessId) {
       throw new ForbiddenException('Access denied to this document');
     }
 
@@ -391,21 +447,28 @@ export class DocumentService {
 
     const document = await this.documentRepository.findOne({
       where: { id: documentId },
-      relations: ['record'],
+      relations: ['record', 'secretariat_record'],
     });
 
     if (!document) {
       throw new NotFoundException('Document not found');
     }
 
-    if (document.record?.business_id !== businessId) {
+    const ownerBusinessId =
+      document.record?.business_id ?? document.secretariat_record?.business_id;
+    if (ownerBusinessId !== businessId) {
       throw new ForbiddenException('Access denied to this document');
     }
 
-    // Update primary flag logic
+    // Update primary flag logic (scoped to the correct parent record)
     if (dto.is_primary) {
       await this.documentRepository.update(
-        { record_id: document.record_id, is_primary: true },
+        document.secretariat_record_id
+          ? {
+              secretariat_record_id: document.secretariat_record_id,
+              is_primary: true,
+            }
+          : { record_id: document.record_id ?? undefined, is_primary: true },
         { is_primary: false },
       );
     }
@@ -435,14 +498,16 @@ export class DocumentService {
 
     const document = await this.documentRepository.findOne({
       where: { id: documentId },
-      relations: ['record'],
+      relations: ['record', 'secretariat_record'],
     });
 
     if (!document) {
       throw new NotFoundException('Document not found');
     }
 
-    if (document.record?.business_id !== businessId) {
+    const ownerBusinessId =
+      document.record?.business_id ?? document.secretariat_record?.business_id;
+    if (ownerBusinessId !== businessId) {
       throw new ForbiddenException('Access denied to this document');
     }
 
@@ -458,14 +523,27 @@ export class DocumentService {
     document.status = DocumentStatus.DELETED;
     await this.documentRepository.save(document);
 
-    // Check if record still has any documents
-    const remainingDocs = await this.documentRepository.count({
-      where: { record_id: document.record_id, status: DocumentStatus.UPLOADED },
-    });
-
-    if (remainingDocs === 0) {
+    // Recompute has_documents from the live count on whichever parent.
+    if (document.secretariat_record_id) {
+      const remaining = await this.documentRepository.count({
+        where: {
+          secretariat_record_id: document.secretariat_record_id,
+          status: DocumentStatus.UPLOADED,
+        },
+      });
+      await this.secretariatRecordRepository.update(
+        document.secretariat_record_id,
+        { has_documents: remaining > 0 },
+      );
+    } else if (document.record_id) {
+      const remaining = await this.documentRepository.count({
+        where: {
+          record_id: document.record_id,
+          status: DocumentStatus.UPLOADED,
+        },
+      });
       await this.notaryRecordRepository.update(document.record_id, {
-        has_documents: false,
+        has_documents: remaining > 0,
       });
     }
 
@@ -653,7 +731,7 @@ export class DocumentService {
 
     return {
       id: document.id,
-      record_id: document.record_id,
+      record_id: document.record_id ?? document.secretariat_record_id ?? '',
       record_display_number: document.record_display_number || '',
       client_name: document.client_name,
       client_id_number: document.client_id_number,

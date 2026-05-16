@@ -1,7 +1,16 @@
-import { Entity, Column, ManyToOne, JoinColumn, Index } from 'typeorm';
+import {
+  Entity,
+  Column,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
+  Index,
+  Relation,
+} from 'typeorm';
 import { Client } from './client.entity';
 import { Business } from './business.entity';
 import { Bill } from './bill.entity';
+import { Document } from './document.entity';
 import { RecordStatus } from '../enums/record-status.enum';
 import { BaseEntity } from './base.entity';
 import { BusinessUser } from './business-user.entity';
@@ -75,6 +84,9 @@ export class SecretariatRecord extends BaseEntity {
   @Column({ type: 'boolean', default: false, name: 'is_imported' })
   is_imported: boolean;
 
+  @Column({ type: 'boolean', default: false, name: 'has_documents' })
+  has_documents: boolean;
+
   @Column({ type: 'uuid', name: 'bill_id', nullable: true })
   bill_id: string | null;
 
@@ -96,4 +108,7 @@ export class SecretariatRecord extends BaseEntity {
   @ManyToOne(() => BusinessUser)
   @JoinColumn({ name: 'served_by' })
   server: BusinessUser | null;
+
+  @OneToMany(() => Document, (document) => document.secretariat_record)
+  attachments: Relation<Document[]>;
 }
