@@ -114,6 +114,15 @@ export class Bill extends BaseEntity {
   @Column({ type: 'enum', enum: BillStatus, default: BillStatus.PENDING })
   status: BillStatus;
 
+  // Per-segment serve tracking so a BOTH bill can have its notary part
+  // and secretariat part served independently (status only becomes
+  // SERVED once every applicable segment is served).
+  @Column({ type: 'timestamp', nullable: true })
+  notary_served_at: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  secretariat_served_at: Date | null;
+
   @Column({ type: 'text', nullable: true })
   notes: string;
 

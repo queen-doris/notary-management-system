@@ -86,6 +86,7 @@ import { EUserRole } from '../../shared/enums/user-role.enum';
 import { VerificationStatus } from '../../shared/enums/client.enum';
 import { RecordStatus } from '../../shared/enums/record-status.enum';
 import { BookTracker } from '../../shared/interfaces/book-tracker.interface';
+import { BookTracker as BookTrackerEntity } from '../../shared/entities/book-tracker.entity';
 import { ProcessRefundDto } from './dto/process-refund.dto';
 import { AddItemsToBillDto } from './dto/add-items.dto';
 import { BookType } from 'src/shared/enums/book-type.enum';
@@ -1540,7 +1541,12 @@ export class BillService {
       where: { id: billId, business_id: businessId },
     });
     if (!bill) throw new NotFoundException('Bill not found');
-    if (!this.SERVABLE_STATUSES.includes(bill.status))
+    // A bill is servable while PAID/REJECTED, OR already SERVED but
+    // with a still-unserved segment (BOTH bills served one half).
+    const servable =
+      this.SERVABLE_STATUSES.includes(bill.status) ||
+      bill.status === BillStatus.SERVED;
+    if (!servable)
       throw new BadRequestException(
         'Only PAID or REJECTED bills can be served',
       );
@@ -1554,6 +1560,18 @@ export class BillService {
     if (notaryItems.length === 0)
       throw new BadRequestException('No notary items found on this bill');
     return { bill, notaryItem: notaryItems[0] };
+  }
+
+  /**
+   * SERVED only once every applicable segment is served; otherwise the
+   * bill keeps its current (PAID/REJECTED) status so the other segment
+   * can still be served.
+   */
+  private deriveServeStatus(bill: Bill): BillStatus {
+    const notaryDone = !bill.notary_total || !!bill.notary_served_at;
+    const secDone =
+      !bill.secretariat_total || !!bill.secretariat_served_at;
+    return notaryDone && secDone ? BillStatus.SERVED : bill.status;
   }
 
   /** Category/book slugs that are land-related and always need a UPI. */
@@ -1594,12 +1612,9 @@ export class BillService {
       billId,
       businessId,
     );
-    const existing = await this.notaryRecordRepository.findOne({
-      where: { bill_id: bill.id },
-    });
-    if (existing)
+    if (bill.notary_served_at)
       throw new ConflictException(
-        'A notary record already exists for this bill',
+        'The notary part of this bill has already been served',
       );
 
     const book = await this.getBook(businessId, bookId);
@@ -1647,13 +1662,11 @@ export class BillService {
       businessId,
     );
 
-    const existing = await this.notaryRecordRepository.findOne({
-      where: { bill_id: bill.id },
-    });
-    if (existing)
+    if (bill.notary_served_at) {
       throw new ConflictException(
-        'A notary record already exists for this bill',
+        'The notary part of this bill has already been served',
       );
+    }
 
     const book = await this.getBook(businessId, dto.book_id);
 
@@ -1663,16 +1676,6 @@ export class BillService {
       );
     }
 
-    // Each of volume / record_number can be independently overridden by
-    // the owner; whatever they don't confirm falls back to the suggested
-    // (auto-computed) value.
-    const next = await this.previewNextNumber(businessId, book);
-    const recordNumber = dto.record_number ?? next.recordNumber;
-    const volume = dto.volume ?? next.volume ?? '';
-    const displayNumber = volume
-      ? `${recordNumber}/${volume}`
-      : `${recordNumber}`;
-
     const businessUser = await this.businessUserRepository.findOne({
       where: { userId: userId, businessId: businessId },
     });
@@ -1680,75 +1683,124 @@ export class BillService {
       throw new NotFoundException('Business user not found');
     }
 
-    const notaryRecord = this.notaryRecordRepository.create({
-      book_type: book.slug,
-      book_id: book.id,
-      bill_id: bill.id,
-      client_id: bill.client_id,
-      business_id: businessId,
-      volume: volume || null,
-      record_number: recordNumber.toString(),
-      display_number: displayNumber,
-      service_category: notaryItem.service_name,
-      sub_service: notaryItem.sub_service_name,
-      amount: notaryItem.subtotal,
-      vat_amount: notaryItem.vat_amount,
-      quantity: notaryItem.quantity,
-      unit_price: notaryItem.unit_price,
-      grand_total: notaryItem.total,
-      upi: dto.upi || bill.client_upi,
-      notary_notes: dto.notary_notes,
-      served_by: businessUser.id,
-      served_date: new Date(),
-      client_full_name: bill.client_full_name,
-      client_id_number: bill.client_id_number,
-      client_email: bill.client_email,
-      client_marital_status: bill.client_marital_status,
-      client_partner_name: bill.client_partner_name,
-      client_phone: bill.client_phone,
-      client_father_name: bill.client_father_name,
-      client_mother_name: bill.client_mother_name,
-      client_province: bill.client_province,
-      client_district: bill.client_district,
-      client_sector: bill.client_sector,
-      client_cell: bill.client_cell,
-      client_village: bill.client_village,
-      client_verification_status: bill.client_verification_status,
-      status: RecordStatus.ACTIVE,
-    });
-
-    // Atomic: advance the book tracker, persist the record and mark the
-    // bill SERVED in one transaction so a mid-failure can't desync
-    // numbering from the saved record.
-    await this.dataSource.transaction(async (m) => {
-      const trackerRepo = m.getRepository('book_trackers');
-      const tracker = (await trackerRepo.findOne({
+    // Everything below is one transaction with a row-level WRITE lock on
+    // the book tracker, so concurrent serves on the same book cannot
+    // read the same "next number" and produce duplicates.
+    const result = await this.dataSource.transaction(async (m) => {
+      const tracker = await m.findOne(BookTrackerEntity, {
         where: { business_id: businessId, book_id: book.id },
-      })) as BookTracker | null;
-      if (tracker) {
-        tracker.current_number = recordNumber;
-        if (volume) tracker.current_volume = volume;
-        if (book.increments_volume_on_serve)
-          tracker.records_in_current_volume += 1;
-        await trackerRepo.save(tracker);
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      // Compute the auto next number from the LOCKED tracker.
+      let autoNumber = (tracker?.current_number ?? 0) + 1;
+      let autoVolume = tracker?.current_volume || '';
+      let rolledOver = false;
+      if (
+        tracker &&
+        book.increments_volume_on_serve &&
+        tracker.records_per_volume > 0 &&
+        tracker.records_in_current_volume >= tracker.records_per_volume
+      ) {
+        autoVolume = this.incrementRoman(tracker.current_volume || 'I');
+        autoNumber = 1;
+        rolledOver = true;
       }
+
+      // Owner may independently override either; the other falls back.
+      const recordNumber = dto.record_number ?? autoNumber;
+      const volume = (dto.volume ?? autoVolume ?? '').trim();
+      const displayNumber = volume
+        ? `${recordNumber}/${volume}`
+        : `${recordNumber}`;
+
+      // Collision guard (defence-in-depth on top of the unique index).
+      const clash = await m.findOne(NotaryRecord, {
+        where: {
+          business_id: businessId,
+          book_id: book.id,
+          volume,
+          record_number: String(recordNumber),
+        },
+      });
+      if (clash) {
+        throw new ConflictException(
+          `Record number ${displayNumber} already exists in this book. Choose a different number.`,
+        );
+      }
+
+      const notaryRecord = m.create(NotaryRecord, {
+        book_type: book.slug,
+        book_id: book.id,
+        bill_id: bill.id,
+        client_id: bill.client_id,
+        business_id: businessId,
+        volume, // normalised to '' (never null) for the unique index
+        record_number: recordNumber.toString(),
+        display_number: displayNumber,
+        service_category: notaryItem.service_name,
+        sub_service: notaryItem.sub_service_name,
+        amount: notaryItem.subtotal,
+        vat_amount: notaryItem.vat_amount,
+        quantity: notaryItem.quantity,
+        unit_price: notaryItem.unit_price,
+        grand_total: notaryItem.total,
+        upi: dto.upi || bill.client_upi,
+        notary_notes: dto.notary_notes,
+        served_by: businessUser.id,
+        served_date: new Date(),
+        client_full_name: bill.client_full_name,
+        client_id_number: bill.client_id_number,
+        client_email: bill.client_email,
+        client_marital_status: bill.client_marital_status,
+        client_partner_name: bill.client_partner_name,
+        client_phone: bill.client_phone,
+        client_father_name: bill.client_father_name,
+        client_mother_name: bill.client_mother_name,
+        client_province: bill.client_province,
+        client_district: bill.client_district,
+        client_sector: bill.client_sector,
+        client_cell: bill.client_cell,
+        client_village: bill.client_village,
+        client_verification_status: bill.client_verification_status,
+        status: RecordStatus.ACTIVE,
+      });
       await m.save(notaryRecord);
-      bill.status = BillStatus.SERVED;
+
+      if (tracker) {
+        // Never let the tracker regress below an existing higher number.
+        tracker.current_number = Math.max(
+          tracker.current_number,
+          recordNumber,
+        );
+        if (volume) tracker.current_volume = volume;
+        if (book.increments_volume_on_serve) {
+          tracker.records_in_current_volume = rolledOver
+            ? 1
+            : tracker.records_in_current_volume + 1;
+        }
+        await m.save(tracker);
+      }
+
+      bill.notary_served_at = new Date();
+      bill.status = this.deriveServeStatus(bill);
       await m.save(bill);
+
+      return notaryRecord;
     });
 
     return {
       message: 'Bill served successfully. Notary record created.',
       notary_record: {
-        id: notaryRecord.id,
-        display_number: notaryRecord.display_number,
-        volume: notaryRecord.volume,
-        record_number: notaryRecord.record_number,
-        book_type: notaryRecord.book_type,
-        book_id: notaryRecord.book_id,
-        service: notaryRecord.sub_service,
-        amount: notaryRecord.amount + notaryRecord.vat_amount,
-        served_date: notaryRecord.served_date,
+        id: result.id,
+        display_number: result.display_number,
+        volume: result.volume,
+        record_number: result.record_number,
+        book_type: result.book_type,
+        book_id: result.book_id,
+        service: result.sub_service,
+        amount: result.amount + result.vat_amount,
+        served_date: result.served_date,
       },
       bill: { id: bill.id, status: bill.status },
     };
@@ -1777,7 +1829,12 @@ export class BillService {
       where: { id: dto.bill_id, business_id: businessId },
     });
     if (!bill) throw new NotFoundException('Bill not found');
-    if (![BillStatus.PAID, BillStatus.REJECTED].includes(bill.status)) {
+    // Servable while PAID/REJECTED, or SERVED-but-secretariat-pending
+    // (BOTH bill whose notary half was already served).
+    const servable =
+      [BillStatus.PAID, BillStatus.REJECTED].includes(bill.status) ||
+      (bill.status === BillStatus.SERVED && !bill.secretariat_served_at);
+    if (!servable) {
       throw new BadRequestException(
         'Only PAID or REJECTED bills can be served',
       );
@@ -1787,13 +1844,9 @@ export class BillService {
         'This bill has no secretariat services to serve',
       );
     }
-
-    const existing = await this.secretariatRecordRepository.count({
-      where: { bill_id: bill.id },
-    });
-    if (existing > 0) {
+    if (bill.secretariat_served_at) {
       throw new ConflictException(
-        'Secretariat records already exist for this bill',
+        'The secretariat part of this bill has already been served',
       );
     }
 
@@ -1808,31 +1861,34 @@ export class BillService {
       where: { userId, businessId },
     });
 
-    const created = await this.secretariatRecordRepository.save(
-      items.map((i) =>
-        this.secretariatRecordRepository.create({
-          service_name: i.service_name,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          subtotal: i.subtotal,
-          total: i.total,
-          client_id: bill.client_id,
-          client_full_name: bill.client_full_name,
-          client_id_number: bill.client_id_number,
-          client_phone: bill.client_phone,
-          client_email: bill.client_email,
-          notes: dto.notes,
-          status: RecordStatus.ACTIVE,
-          served_by: businessUser?.id ?? null,
-          served_date: new Date(),
-          bill_id: bill.id,
-          business_id: businessId,
-        }),
-      ),
-    );
-
-    bill.status = BillStatus.SERVED;
-    await this.billRepository.save(bill);
+    const created = await this.dataSource.transaction(async (m) => {
+      const recs = await m.save(
+        items.map((i) =>
+          m.create(SecretariatRecord, {
+            service_name: i.service_name,
+            quantity: i.quantity,
+            unit_price: i.unit_price,
+            subtotal: i.subtotal,
+            total: i.total,
+            client_id: bill.client_id,
+            client_full_name: bill.client_full_name,
+            client_id_number: bill.client_id_number,
+            client_phone: bill.client_phone,
+            client_email: bill.client_email,
+            notes: dto.notes,
+            status: RecordStatus.ACTIVE,
+            served_by: businessUser?.id ?? null,
+            served_date: new Date(),
+            bill_id: bill.id,
+            business_id: businessId,
+          }),
+        ),
+      );
+      bill.secretariat_served_at = new Date();
+      bill.status = this.deriveServeStatus(bill);
+      await m.save(bill);
+      return recs;
+    });
 
     return {
       message: 'Secretariat bill served. Records created.',

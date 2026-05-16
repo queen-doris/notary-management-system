@@ -24,6 +24,12 @@ import { BusinessUser } from './business-user.entity';
 @Index(['served_date'])
 @Index(['client_full_name'])
 @Index(['client_id_number'])
+// A record number is unique within a book + volume for a business.
+// `volume` is normalised to '' (never null) so this also enforces
+// uniqueness for volume-less books.
+@Index(['business_id', 'book_id', 'volume', 'record_number'], {
+  unique: true,
+})
 export class NotaryRecord extends BaseEntity {
   // ============================================
   // Book Information (book_type kept as a denormalized
