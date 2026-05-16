@@ -1641,7 +1641,6 @@ export class BillService {
     const displayNumber = volume
       ? `${recordNumber}/${volume}`
       : `${recordNumber}`;
-    await this.updateBookTracker(businessId, book, volume, recordNumber);
 
     const businessUser = await this.businessUserRepository.findOne({
       where: { userId: userId, businessId: businessId },
@@ -1686,10 +1685,26 @@ export class BillService {
       client_verification_status: bill.client_verification_status,
       status: RecordStatus.ACTIVE,
     });
-    await this.notaryRecordRepository.save(notaryRecord);
 
-    bill.status = BillStatus.SERVED;
-    await this.billRepository.save(bill);
+    // Atomic: advance the book tracker, persist the record and mark the
+    // bill SERVED in one transaction so a mid-failure can't desync
+    // numbering from the saved record.
+    await this.dataSource.transaction(async (m) => {
+      const trackerRepo = m.getRepository('book_trackers');
+      const tracker = (await trackerRepo.findOne({
+        where: { business_id: businessId, book_id: book.id },
+      })) as BookTracker | null;
+      if (tracker) {
+        tracker.current_number = recordNumber;
+        if (volume) tracker.current_volume = volume;
+        if (book.increments_volume_on_serve)
+          tracker.records_in_current_volume += 1;
+        await trackerRepo.save(tracker);
+      }
+      await m.save(notaryRecord);
+      bill.status = BillStatus.SERVED;
+      await m.save(bill);
+    });
 
     return {
       message: 'Bill served successfully. Notary record created.',

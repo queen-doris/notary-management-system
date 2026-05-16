@@ -729,11 +729,14 @@ export class BooksService {
     businessId: string,
     userRoles: EBusinessRole[],
     fileBuffer: Buffer,
+    dryRun = false,
   ): Promise<{
+    dry_run: boolean;
     imported: number;
     skipped: number;
     books_touched: string[];
     errors: string[];
+    sample?: unknown[];
   }> {
     if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
@@ -807,35 +810,39 @@ export class BooksService {
         let book = bookBySlug.get(slug);
         const volume = r[cI.volume] ? String(r[cI.volume]).trim() : null;
         if (!book) {
-          book = await this.bookRepository.save(
-            this.bookRepository.create({
-              name: bookName || 'Imported',
-              slug,
-              has_volume: !!volume,
-              volume_format: volume
-                ? VolumeFormat.ROMAN
-                : VolumeFormat.NONE,
-              records_per_volume: 0,
-              volume_separator: '/',
-              requires_upi: slug === 'ubutaka' || slug === 'land',
-              increments_volume_on_serve: false,
-              is_active: true,
-              is_custom: true,
-              business_id: businessId,
-            }),
-          );
+          const draft = this.bookRepository.create({
+            name: bookName || 'Imported',
+            slug,
+            has_volume: !!volume,
+            volume_format: volume ? VolumeFormat.ROMAN : VolumeFormat.NONE,
+            records_per_volume: 0,
+            volume_separator: '/',
+            requires_upi: slug === 'ubutaka' || slug === 'land',
+            increments_volume_on_serve: false,
+            is_active: true,
+            is_custom: true,
+            business_id: businessId,
+          });
+          if (dryRun) {
+            // Don't persist on a dry run; use an in-memory placeholder
+            // so mapping/validation can continue.
+            book = draft;
+            book.id = book.id || `(new) ${slug}`;
+          } else {
+            book = await this.bookRepository.save(draft);
+            await this.bookTrackerRepository.save(
+              this.bookTrackerRepository.create({
+                book_id: book.id,
+                current_volume: volume || undefined,
+                current_number: 0,
+                records_per_volume: 0,
+                records_in_current_volume: 0,
+                is_active: true,
+                business_id: businessId,
+              }),
+            );
+          }
           bookBySlug.set(slug, book);
-          await this.bookTrackerRepository.save(
-            this.bookTrackerRepository.create({
-              book_id: book.id,
-              current_volume: volume || undefined,
-              current_number: 0,
-              records_per_volume: 0,
-              records_in_current_volume: 0,
-              is_active: true,
-              business_id: businessId,
-            }),
-          );
         }
 
         const num = parseInt(String(numberRaw ?? '0'), 10) || 0;
@@ -889,26 +896,50 @@ export class BooksService {
         parseInt(a.record_number, 10) - parseInt(b.record_number, 10),
     );
 
-    // Bulk insert in chunks.
-    for (let i = 0; i < toSave.length; i += 200) {
-      await this.notaryRecordRepository.save(toSave.slice(i, i + 200));
+    if (dryRun) {
+      return {
+        dry_run: true,
+        imported: 0,
+        skipped,
+        books_touched: [...bookMax.keys()],
+        errors,
+        sample: toSave.slice(0, 5).map((r) => ({
+          served_date: r.served_date,
+          book_type: r.book_type,
+          display_number: r.display_number,
+          client_full_name: r.client_full_name,
+          client_id_number: r.client_id_number,
+          sub_service: r.sub_service,
+          service_category: r.service_category,
+          amount: r.amount,
+          quantity: r.quantity,
+        })),
+      };
     }
 
-    // Advance each touched book's tracker so new serves continue.
-    for (const [slug, max] of bookMax) {
-      const book = bookBySlug.get(slug);
-      if (!book) continue;
-      const tracker = await this.bookTrackerRepository.findOne({
-        where: { business_id: businessId, book_id: book.id },
-      });
-      if (tracker && max.num > tracker.current_number) {
-        tracker.current_number = max.num;
-        if (max.volume) tracker.current_volume = max.volume;
-        await this.bookTrackerRepository.save(tracker);
+    // Atomic: persist all records + advance every touched book's
+    // tracker in a single transaction (all-or-nothing import).
+    await this.dataSource.transaction(async (m) => {
+      for (let i = 0; i < toSave.length; i += 200) {
+        await m.save(toSave.slice(i, i + 200));
       }
-    }
+      const trackerRepo = m.getRepository(BookTracker);
+      for (const [slug, max] of bookMax) {
+        const book = bookBySlug.get(slug);
+        if (!book) continue;
+        const tracker = await trackerRepo.findOne({
+          where: { business_id: businessId, book_id: book.id },
+        });
+        if (tracker && max.num > tracker.current_number) {
+          tracker.current_number = max.num;
+          if (max.volume) tracker.current_volume = max.volume;
+          await trackerRepo.save(tracker);
+        }
+      }
+    });
 
     return {
+      dry_run: false,
       imported: toSave.length,
       skipped,
       books_touched: [...bookMax.keys()],

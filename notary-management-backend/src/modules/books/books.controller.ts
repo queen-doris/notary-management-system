@@ -85,6 +85,13 @@ export class BooksController {
       },
     },
   })
+  @ApiQuery({
+    name: 'dryRun',
+    required: false,
+    type: Boolean,
+    description:
+      'When true, validate & preview (counts, errors, first 5 mapped rows) WITHOUT saving anything.',
+  })
   @ApiCreatedResponse({
     description: 'Import summary (imported / skipped / books / errors)',
   })
@@ -92,11 +99,13 @@ export class BooksController {
   async importNotaryRecords(
     @Req() req: AuthenticatedRequest,
     @UploadedFile() file: Express.Multer.File,
+    @Query('dryRun') dryRun?: string,
   ) {
     return this.booksService.importNotaryRecordsFromExcel(
       req.user.businessId,
       req.user.businessRoles,
       file?.buffer,
+      dryRun === 'true' || dryRun === '1',
     );
   }
 
