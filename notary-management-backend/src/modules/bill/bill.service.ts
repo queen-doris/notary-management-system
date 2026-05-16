@@ -1721,14 +1721,46 @@ export class BillService {
       .orderBy('bill.createdAt', 'ASC')
       .getMany();
 
-    return bills.map((bill) => ({
+    return Promise.all(bills.map((b) => this.formatPendingBill(b)));
+  }
+
+  /** Detailed pending-bill projection: full client + all requested items. */
+  private async formatPendingBill(bill: Bill) {
+    const items = await this.billItemRepository.find({
+      where: { bill_id: bill.id },
+    });
+    return {
       id: bill.id,
       bill_number: bill.bill_number,
-      client_name: bill.client_full_name,
-      client_phone: bill.client_phone,
+      bill_type: bill.bill_type,
+      status: bill.status,
+      client: {
+        id: bill.client_id,
+        full_name: bill.client_full_name,
+        id_number: bill.client_id_number,
+        phone: bill.client_phone,
+        email: bill.client_email,
+        upi: bill.client_upi,
+      },
+      notary_subtotal: bill.notary_subtotal,
+      notary_vat: bill.notary_vat,
       notary_total: bill.notary_total,
+      secretariat_total: bill.secretariat_total,
+      grand_total: bill.grand_total,
+      amount_paid: bill.amount_paid,
+      paid_at: bill.paid_at,
       created_at: bill.createdAt,
-    }));
+      items: items.map((i) => ({
+        item_type: i.item_type,
+        service_name: i.service_name,
+        sub_service_name: i.sub_service_name,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        subtotal: i.subtotal,
+        vat_amount: i.vat_amount,
+        total: i.total,
+      })),
+    };
   }
 
   async getPendingSecretariatBills(businessId: string): Promise<any[]> {
@@ -1748,14 +1780,7 @@ export class BillService {
       .orderBy('bill.createdAt', 'ASC')
       .getMany();
 
-    return bills.map((bill) => ({
-      id: bill.id,
-      bill_number: bill.bill_number,
-      client_name: bill.client_full_name,
-      client_phone: bill.client_phone,
-      secretariat_total: bill.secretariat_total,
-      created_at: bill.createdAt,
-    }));
+    return Promise.all(bills.map((b) => this.formatPendingBill(b)));
   }
 
   // ==================== Get Notary Records ====================
@@ -2338,6 +2363,10 @@ export class BillService {
 
     let grossRevenue = 0;
     let totalRefunds = 0;
+    let notaryRefundsTotal = 0;
+    let secretariatRefundsTotal = 0;
+    let grossNotary = 0;
+    let grossSecretariat = 0;
     let netNotaryRevenue = 0;
     let netSecretariatRevenue = 0;
     let totalVat = 0;
@@ -2355,6 +2384,10 @@ export class BillService {
       );
       grossRevenue += bill.grand_total;
       totalRefunds += refund;
+      notaryRefundsTotal += notaryRefund;
+      secretariatRefundsTotal += secretariatRefund;
+      grossNotary += bill.notary_total;
+      grossSecretariat += bill.secretariat_total;
       netNotaryRevenue += bill.notary_total - notaryRefund;
       netSecretariatRevenue += bill.secretariat_total - secretariatRefund;
       totalVat += bill.notary_vat;
@@ -2403,7 +2436,11 @@ export class BillService {
       summary: {
         total_bills: bills.length,
         gross_revenue: grossRevenue,
+        gross_notary_revenue: grossNotary,
+        gross_secretariat_revenue: grossSecretariat,
         total_refunds: totalRefunds,
+        notary_refunds: notaryRefundsTotal,
+        secretariat_refunds: secretariatRefundsTotal,
         total_revenue: netRevenue,
         total_notary_revenue: netNotaryRevenue,
         total_secretariat_revenue: netSecretariatRevenue,
@@ -2412,17 +2449,32 @@ export class BillService {
       },
       payment_method_breakdown: paymentMethodBreakdown,
       breakdown_by_period: periods,
+      // Each transaction shows the ORIGINAL as-sold figures (never
+      // retroactively mutated by later refunds) plus explicit, separated
+      // notary/secretariat refund columns and the resulting net.
       transactions: bills.map((b) => {
-        const refund = this.billRefundAmount(b);
+        const notaryRefund = this.segmentRefund(b, b.notary_total);
+        const secretariatRefund = this.segmentRefund(
+          b,
+          b.secretariat_total,
+        );
+        const totalRefund = this.billRefundAmount(b);
         return {
           id: b.id,
           bill_number: b.bill_number,
           client_name: b.client_full_name,
-          notary_amount: b.notary_total - this.segmentRefund(b, b.notary_total),
-          secretariat_amount:
-            b.secretariat_total - this.segmentRefund(b, b.secretariat_total),
-          total: b.grand_total - refund,
+          status: b.status,
+          // Original amounts as billed/paid (denormalized snapshot)
+          notary_amount: b.notary_total,
+          secretariat_amount: b.secretariat_total,
+          total: b.grand_total,
           vat: b.notary_vat,
+          // Refunds, separated by segment
+          notary_refund: notaryRefund,
+          secretariat_refund: secretariatRefund,
+          total_refund: totalRefund,
+          // Net after refunds
+          net_total: b.grand_total - totalRefund,
           date: b.createdAt,
         };
       }),

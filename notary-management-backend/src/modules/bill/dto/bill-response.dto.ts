@@ -520,7 +520,11 @@ export class DailySalesReportDto {
   summary!: {
     total_bills: number;
     gross_revenue: number;
+    gross_notary_revenue: number;
+    gross_secretariat_revenue: number;
     total_refunds: number;
+    notary_refunds: number;
+    secretariat_refunds: number;
     total_revenue: number; // net (= gross − refunds)
     total_notary_revenue: number; // net
     total_secretariat_revenue: number; // net
