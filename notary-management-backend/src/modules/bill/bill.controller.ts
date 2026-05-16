@@ -33,10 +33,7 @@ import { CreateBillDto } from './dto/create-bill.dto';
 import { UpdateBillStatusDto } from './dto/update-bill-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { RejectBillDto } from './dto/reject-bill.dto';
-import {
-  ServeBillDto,
-  ServePreviewResponseDto,
-} from './dto/serve-bill.dto';
+import { ServeBillDto, ServePreviewResponseDto } from './dto/serve-bill.dto';
 import { ReportFiltersDto } from './dto/report-filters.dto';
 import {
   BillResponseDto,
@@ -213,7 +210,6 @@ VAT is automatically calculated for NOTARY items.
   ): Promise<{ message: string; payment: any; bill: any }> {
     return this.billService.recordPayment(user.id, user.businessId, dto);
   }
-
 
   // ==================== Status Management ====================
 
@@ -404,19 +400,14 @@ VAT is automatically calculated for NOTARY items.
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: { bill_id: string; notes?: string },
   ) {
-    return this.billService.serveSecretariatBill(
-      user.id,
-      user.businessId,
-      dto,
-    );
+    return this.billService.serveSecretariatBill(user.id, user.businessId, dto);
   }
 
   @Get('secretariat-records')
   @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
   @ApiOperation({
     summary: 'List secretariat records',
-    description:
-      'Paginated secretariat records with client/date filters.',
+    description: 'Paginated secretariat records with client/date filters.',
   })
   @ApiQuery({ name: 'start_date', required: false, example: '2026-01-01' })
   @ApiQuery({ name: 'end_date', required: false, example: '2026-12-31' })
@@ -506,9 +497,9 @@ VAT is automatically calculated for NOTARY items.
   @Get('reports/:kind/export')
   @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
   @ApiOperation({
-    summary: 'Download a report as Excel',
+    summary: 'Download a report as Excel, PDF or Word',
     description:
-      'Streams the report as an .xlsx file. kind: minijust | financial-notary | financial-secretariat | daily-sales. Accepts the same filters as the JSON report endpoints. (PDF/Word export is planned — see notes.)',
+      'Streams the report file. kind: minijust | financial-notary | financial-secretariat | daily-sales. format (query): xlsx (default) | pdf | docx. Accepts the same filters as the JSON report endpoints.',
   })
   @ApiParam({
     name: 'kind',
@@ -519,21 +510,29 @@ VAT is automatically calculated for NOTARY items.
       'daily-sales',
     ],
   })
-  @ApiOkResponse({ description: 'XLSX file stream' })
+  @ApiQuery({
+    name: 'format',
+    required: false,
+    enum: ['xlsx', 'pdf', 'docx'],
+    description: 'Output format (default xlsx)',
+  })
+  @ApiOkResponse({ description: 'Report file stream (xlsx/pdf/docx)' })
   async exportReport(
     @CurrentUser() user: AuthenticatedUser,
     @Param('kind') kind: string,
+    @Query('format') format: string,
     @Query() filters: ReportFiltersDto,
     @Res() res: Response,
   ): Promise<void> {
-    const { buffer, filename } = await this.billService.exportReportExcel(
-      user.businessId,
-      kind,
-      filters,
-    );
+    const { buffer, filename, contentType } =
+      await this.billService.exportReport(
+        user.businessId,
+        kind,
+        format,
+        filters,
+      );
     res.set({
-      'Content-Type':
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type': contentType,
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
     res.send(buffer);

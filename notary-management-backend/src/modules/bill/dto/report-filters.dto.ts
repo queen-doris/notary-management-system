@@ -102,4 +102,12 @@ export class ReportFiltersDto {
   @IsOptional()
   @IsEnum(ReportGroupBy)
   group_by?: ReportGroupBy;
+
+  @ApiPropertyOptional({
+    description: 'Export format for /export endpoints: xlsx | pdf | docx',
+    enum: ['xlsx', 'pdf', 'docx'],
+  })
+  @IsOptional()
+  @IsString()
+  format?: string;
 }

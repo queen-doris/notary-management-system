@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Injectable,
   NotFoundException,
@@ -214,8 +213,8 @@ export class BooksService {
         manager.create(BookTracker, {
           book_id: book.id,
           current_volume: hasVolume
-            ? dto.current_volume ??
-              (volumeFormat === VolumeFormat.ROMAN ? 'I' : '1')
+            ? (dto.current_volume ??
+              (volumeFormat === VolumeFormat.ROMAN ? 'I' : '1'))
             : undefined,
           current_number: dto.current_number ?? 0,
           records_per_volume: dto.records_per_volume ?? 0,
@@ -302,9 +301,7 @@ export class BooksService {
       relations: ['book'],
     });
     if (!tracker) {
-      throw new NotFoundException(
-        `Book tracker for "${book.name}" not found`,
-      );
+      throw new NotFoundException(`Book tracker for "${book.name}" not found`);
     }
     return tracker;
   }
@@ -630,7 +627,7 @@ export class BooksService {
   }> {
     const books = await this.getBooks(businessId);
 
-    const stats = (await this.notaryRecordRepository
+    const stats = await this.notaryRecordRepository
       .createQueryBuilder('record')
       .select('record.book_id', 'book_id')
       .addSelect('COUNT(*)', 'total_records')
@@ -638,11 +635,7 @@ export class BooksService {
       .where('record.business_id = :businessId', { businessId })
       .andWhere('record.status = :status', { status: RecordStatus.ACTIVE })
       .groupBy('record.book_id')
-      .getRawMany()) as Array<{
-      book_id: string | null;
-      total_records: string;
-      total_amount: string | null;
-    }>;
+      .getRawMany();
 
     const statByBook = new Map<
       string,
@@ -752,23 +745,23 @@ export class BooksService {
       rows = XLSX.utils.sheet_to_json(ws, {
         header: 1,
         blankrows: false,
-      }) as unknown[][];
+      });
     } catch {
       throw new BadRequestException('Could not parse the Excel file');
     }
 
     // Locate the header row (the one containing the known column names).
     const headerIdx = rows.findIndex((r) =>
-      (r || []).some((c) => ['ITARIKI', 'NUMERO', 'AMAZINA'].includes(
-        this.norm(c),
-      )),
+      (r || []).some((c) =>
+        ['ITARIKI', 'NUMERO', 'AMAZINA'].includes(this.norm(c)),
+      ),
     );
     if (headerIdx === -1) {
       throw new BadRequestException(
         'Could not find a header row (expected columns like ITARIKI, NUMERO, AMAZINA)',
       );
     }
-    const header = (rows[headerIdx] as unknown[]).map((c) => this.norm(c));
+    const header = rows[headerIdx].map((c) => this.norm(c));
     const col = (name: string) => header.indexOf(name);
     const cI = {
       date: col('ITARIKI'),
@@ -804,8 +797,9 @@ export class BooksService {
         continue;
       }
       try {
-        const bookName = String(r[cI.book] ?? r[cI.service] ?? 'Imported')
-          .trim();
+        const bookName = String(
+          r[cI.book] ?? r[cI.service] ?? 'Imported',
+        ).trim();
         const slug = Generators.slugify(bookName) || 'imported';
         let book = bookBySlug.get(slug);
         const volume = r[cI.volume] ? String(r[cI.volume]).trim() : null;
@@ -857,9 +851,7 @@ export class BooksService {
             volume,
             record_number: String(num),
             display_number: displayNumber,
-            service_category: String(
-              r[cI.service] ?? bookName ?? '',
-            ).trim(),
+            service_category: String(r[cI.service] ?? bookName ?? '').trim(),
             sub_service: String(r[cI.sub] ?? '').trim(),
             amount: price,
             vat_amount: 0,
@@ -891,8 +883,7 @@ export class BooksService {
     // Sort by date then number for stable storage order.
     toSave.sort(
       (a, b) =>
-        new Date(a.served_date).getTime() -
-          new Date(b.served_date).getTime() ||
+        new Date(a.served_date).getTime() - new Date(b.served_date).getTime() ||
         parseInt(a.record_number, 10) - parseInt(b.record_number, 10),
     );
 

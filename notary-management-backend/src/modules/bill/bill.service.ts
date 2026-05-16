@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
-/* eslint-disable prefer-const */
+
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
   Injectable,
@@ -31,6 +31,18 @@ import { NotaryRecord } from '../../shared/entities/notary-record.entity';
 import { SecretariatRecord } from '../../shared/entities/secretariat-record.entity';
 import { Document } from '../../shared/entities/document.entity';
 import * as XLSX from 'xlsx';
+import PDFDocument from 'pdfkit';
+import {
+  Document as DocxDocument,
+  Packer,
+  Paragraph as DocxParagraph,
+  TextRun,
+  Table as DocxTable,
+  TableRow as DocxTableRow,
+  TableCell as DocxTableCell,
+  HeadingLevel,
+  WidthType,
+} from 'docx';
 import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import {
@@ -959,9 +971,7 @@ export class BillService {
           );
         }
       } else {
-        throw new BadRequestException(
-          'No secretariat items provided to add',
-        );
+        throw new BadRequestException('No secretariat items provided to add');
       }
 
       let notarySubtotal = bill.notary_subtotal;
@@ -1770,9 +1780,7 @@ export class BillService {
       where: { bill_id: bill.id, item_type: ItemType.SECRETARIAT },
     });
     if (items.length === 0) {
-      throw new BadRequestException(
-        'No secretariat items found on this bill',
-      );
+      throw new BadRequestException('No secretariat items found on this bill');
     }
 
     const businessUser = await this.businessUserRepository.findOne({
@@ -2612,10 +2620,7 @@ export class BillService {
       // notary/secretariat refund columns and the resulting net.
       transactions: bills.map((b) => {
         const notaryRefund = this.segmentRefund(b, b.notary_total);
-        const secretariatRefund = this.segmentRefund(
-          b,
-          b.secretariat_total,
-        );
+        const secretariatRefund = this.segmentRefund(b, b.secretariat_total);
         const totalRefund = this.billRefundAmount(b);
         return {
           id: b.id,
@@ -2744,60 +2749,191 @@ export class BillService {
     };
   }
 
-  /**
-   * Export a report as an .xlsx Buffer. kind: 'minijust' |
-   * 'financial-notary' | 'financial-secretariat' | 'daily-sales'.
-   */
-  async exportReportExcel(
+  /** Gather a report's tabular rows + optional summary. */
+  private async gatherReport(
     businessId: string,
     kind: string,
     filters: ReportFiltersDto,
-  ): Promise<{ buffer: Buffer; filename: string }> {
-    const wb = XLSX.utils.book_new();
-    let rows: Record<string, unknown>[] = [];
-    let summary: Record<string, unknown> | null = null;
-    let filename = `${kind}-report.xlsx`;
-
+  ): Promise<{
+    rows: Record<string, unknown>[];
+    summary: Record<string, unknown> | null;
+    baseName: string;
+    title: string;
+  }> {
     if (kind === 'minijust') {
       const rep = await this.getMinijustReport(businessId, filters);
-      rows = rep.records as unknown as Record<string, unknown>[];
-      filename = 'minijust-report.xlsx';
-    } else if (kind === 'financial-notary') {
+      return {
+        rows: rep.records as unknown as Record<string, unknown>[],
+        summary: null,
+        baseName: 'minijust-report',
+        title: 'Minijust Report',
+      };
+    }
+    if (kind === 'financial-notary') {
       const rep = await this.getNotaryFinancialReport(businessId, filters);
-      rows = rep.records as unknown as Record<string, unknown>[];
-      summary = rep.summary as unknown as Record<string, unknown>;
-      filename = 'notary-financial-report.xlsx';
-    } else if (kind === 'financial-secretariat') {
-      const rep = await this.getSecretariatFinancialReport(
-        businessId,
-        filters,
-      );
-      rows = rep.records as unknown as Record<string, unknown>[];
-      summary = rep.summary as unknown as Record<string, unknown>;
-      filename = 'secretariat-financial-report.xlsx';
-    } else if (kind === 'daily-sales') {
+      return {
+        rows: rep.records as unknown as Record<string, unknown>[],
+        summary: rep.summary as unknown as Record<string, unknown>,
+        baseName: 'notary-financial-report',
+        title: 'Notary Financial Report',
+      };
+    }
+    if (kind === 'financial-secretariat') {
+      const rep = await this.getSecretariatFinancialReport(businessId, filters);
+      return {
+        rows: rep.records as unknown as Record<string, unknown>[],
+        summary: rep.summary as unknown as Record<string, unknown>,
+        baseName: 'secretariat-financial-report',
+        title: 'Secretariat Financial Report',
+      };
+    }
+    if (kind === 'daily-sales') {
       const rep = await this.getDailySalesReport(businessId, filters);
-      rows = rep.transactions as unknown as Record<string, unknown>[];
-      summary = rep.summary as unknown as Record<string, unknown>;
-      filename = 'daily-sales-report.xlsx';
-    } else {
-      throw new BadRequestException(
-        'Unknown report kind. Use: minijust | financial-notary | financial-secretariat | daily-sales',
+      return {
+        rows: rep.transactions as unknown as Record<string, unknown>[],
+        summary: rep.summary as unknown as Record<string, unknown>,
+        baseName: 'daily-sales-report',
+        title: 'Daily Sales Report',
+      };
+    }
+    throw new BadRequestException(
+      'Unknown report kind. Use: minijust | financial-notary | financial-secretariat | daily-sales',
+    );
+  }
+
+  /**
+   * Export a report as Excel, PDF or Word.
+   * format: 'xlsx' | 'pdf' | 'docx'.
+   */
+  async exportReport(
+    businessId: string,
+    kind: string,
+    format: string,
+    filters: ReportFiltersDto,
+  ): Promise<{ buffer: Buffer; filename: string; contentType: string }> {
+    const { rows, summary, baseName, title } = await this.gatherReport(
+      businessId,
+      kind,
+      filters,
+    );
+    const fmt = (format || 'xlsx').toLowerCase();
+
+    if (fmt === 'xlsx') {
+      const wb = XLSX.utils.book_new();
+      if (summary) {
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.json_to_sheet([summary]),
+          'Summary',
+        );
+      }
+      XLSX.utils.book_append_sheet(
+        wb,
+        XLSX.utils.json_to_sheet(rows.length ? rows : [{}]),
+        'Records',
       );
+      return {
+        buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
+        filename: `${baseName}.xlsx`,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
     }
 
-    if (summary) {
-      const summarySheet = XLSX.utils.json_to_sheet([summary]);
-      XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
-    }
-    const dataSheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
-    XLSX.utils.book_append_sheet(wb, dataSheet, 'Records');
+    const headers = rows.length ? Object.keys(rows[0]) : [];
 
-    const buffer = XLSX.write(wb, {
-      type: 'buffer',
-      bookType: 'xlsx',
-    }) as Buffer;
-    return { buffer, filename };
+    if (fmt === 'pdf') {
+      const doc = new PDFDocument({
+        margin: 24,
+        size: 'A4',
+        layout: 'landscape',
+      });
+      const chunks: Buffer[] = [];
+      doc.on('data', (c: Buffer) => chunks.push(c));
+      const done = new Promise<Buffer>((resolve) =>
+        doc.on('end', () => resolve(Buffer.concat(chunks))),
+      );
+      doc.fontSize(16).text(title, { underline: true });
+      doc.moveDown(0.5);
+      if (summary) {
+        doc.fontSize(10);
+        for (const [k, v] of Object.entries(summary)) {
+          doc.text(`${k}: ${String(v)}`);
+        }
+        doc.moveDown(0.5);
+      }
+      doc.fontSize(8);
+      if (headers.length) {
+        doc.text(headers.join(' | '));
+        doc.moveDown(0.2);
+        for (const r of rows) {
+          doc.text(headers.map((h) => String(r[h] ?? '')).join(' | '));
+        }
+      } else {
+        doc.text('No records.');
+      }
+      doc.end();
+      return {
+        buffer: await done,
+        filename: `${baseName}.pdf`,
+        contentType: 'application/pdf',
+      };
+    }
+
+    if (fmt === 'docx') {
+      const children: (DocxParagraph | DocxTable)[] = [
+        new DocxParagraph({
+          text: title,
+          heading: HeadingLevel.HEADING_1,
+        }),
+      ];
+      if (summary) {
+        for (const [k, v] of Object.entries(summary)) {
+          children.push(new DocxParagraph(`${k}: ${String(v)}`));
+        }
+      }
+      if (headers.length) {
+        const headerRow = new DocxTableRow({
+          children: headers.map(
+            (h) =>
+              new DocxTableCell({
+                children: [
+                  new DocxParagraph({
+                    children: [new TextRun({ text: h, bold: true })],
+                  }),
+                ],
+              }),
+          ),
+        });
+        const dataRows = rows.map(
+          (r) =>
+            new DocxTableRow({
+              children: headers.map(
+                (h) =>
+                  new DocxTableCell({
+                    children: [new DocxParagraph(String(r[h] ?? ''))],
+                  }),
+              ),
+            }),
+        );
+        children.push(
+          new DocxTable({
+            rows: [headerRow, ...dataRows],
+            width: { size: 100, type: WidthType.PERCENTAGE },
+          }),
+        );
+      }
+      const document = new DocxDocument({ sections: [{ children }] });
+      const buffer = await Packer.toBuffer(document);
+      return {
+        buffer: Buffer.from(buffer),
+        filename: `${baseName}.docx`,
+        contentType:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      };
+    }
+
+    throw new BadRequestException('Unknown format. Use: xlsx | pdf | docx');
   }
 
   async getAllRefunds(
