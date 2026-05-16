@@ -182,6 +182,21 @@ export class BillResponseDto {
   @ApiPropertyOptional()
   rejection_notes?: string;
 
+  @ApiPropertyOptional()
+  paid_at?: Date;
+
+  @ApiPropertyOptional()
+  refund_status?: string;
+
+  @ApiPropertyOptional()
+  refund_requested_amount?: number;
+
+  @ApiPropertyOptional({ description: 'Total refunded so far' })
+  amount_refunded?: number;
+
+  @ApiPropertyOptional()
+  profit_after_refund?: number;
+
   @ApiProperty({ type: [NotaryItemDto] })
   notary_items: NotaryItemDto[] = [];
 
@@ -190,6 +205,12 @@ export class BillResponseDto {
 
   @ApiProperty({ type: [PaymentDto] })
   payments: PaymentDto[] = [];
+
+  @ApiPropertyOptional({
+    description: 'Refund records for this bill',
+    type: 'array',
+  })
+  refunds?: Array<Record<string, unknown>>;
 
   @ApiProperty()
   created_by_name!: string;

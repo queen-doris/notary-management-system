@@ -628,6 +628,10 @@ export class BillService {
       where: { bill_id: bill.id },
       order: { processed_at: 'DESC' },
     });
+    const refunds = await this.refundRepository.find({
+      where: { bill_id: bill.id },
+      order: { requested_at: 'DESC' },
+    });
     const creatorInfo = await this.getUserInfo(bill.created_by, businessId);
 
     // Separate items by type
@@ -689,8 +693,13 @@ export class BillService {
       amount_paid: bill.amount_paid,
       remaining_balance: bill.remaining_balance,
       status: bill.status,
+      paid_at: bill.paid_at,
       rejection_reason: bill.rejection_reason,
       rejection_notes: bill.rejection_notes,
+      refund_status: bill.refund_status,
+      refund_requested_amount: bill.refund_requested_amount,
+      amount_refunded: bill.amount_refunded || 0,
+      profit_after_refund: bill.profit_after_refund,
       notary_items: notaryItems,
       secretariat_items: secretariatItems,
       payments: payments.map((p) => ({
@@ -700,6 +709,18 @@ export class BillService {
         reference: p.reference,
         processed_by_name: p.processed_by_name,
         processed_at: p.processed_at,
+      })),
+      refunds: refunds.map((r) => ({
+        id: r.id,
+        refund_type: r.refund_type,
+        requested_amount: r.requested_amount,
+        actual_refunded_amount: r.actual_refunded_amount,
+        status: r.status,
+        reason: r.reason,
+        notes: r.notes,
+        refund_method: r.refund_method,
+        requested_at: r.requested_at,
+        processed_at: r.processed_at,
       })),
       created_by_name: creatorInfo.name,
       created_by_role: creatorInfo.role,
