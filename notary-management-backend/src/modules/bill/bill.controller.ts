@@ -11,7 +11,9 @@ import {
   Patch,
   Delete,
   Put,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -499,6 +501,42 @@ VAT is automatically calculated for NOTARY items.
     @Query() filters: ReportFiltersDto,
   ): Promise<any> {
     return this.billService.getDailySalesReport(user.businessId, filters);
+  }
+
+  @Get('reports/:kind/export')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Download a report as Excel',
+    description:
+      'Streams the report as an .xlsx file. kind: minijust | financial-notary | financial-secretariat | daily-sales. Accepts the same filters as the JSON report endpoints. (PDF/Word export is planned — see notes.)',
+  })
+  @ApiParam({
+    name: 'kind',
+    enum: [
+      'minijust',
+      'financial-notary',
+      'financial-secretariat',
+      'daily-sales',
+    ],
+  })
+  @ApiOkResponse({ description: 'XLSX file stream' })
+  async exportReport(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('kind') kind: string,
+    @Query() filters: ReportFiltersDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } = await this.billService.exportReportExcel(
+      user.businessId,
+      kind,
+      filters,
+    );
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    res.send(buffer);
   }
 
   // ==================== Pending Bills (For Specific Roles) ====================

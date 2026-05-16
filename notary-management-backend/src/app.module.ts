@@ -34,6 +34,7 @@ import { ClientModule } from './modules/client/client.module';
 import { SecretariatServiceModule } from './modules/secretariat-service/secretariat-service.module';
 import { NotaryServiceModule } from './modules/notary-service/notary-service.module';
 import { DocumentModule } from './modules/document/document.module';
+import { ReportArchiveModule } from './modules/report-archive/report-archive.module';
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -119,6 +120,7 @@ import { DocumentModule } from './modules/document/document.module';
     NotaryServiceModule,
     SecretariatServiceModule,
     DocumentModule,
+    ReportArchiveModule,
   ],
   controllers: [AppController],
   providers: [AppService],

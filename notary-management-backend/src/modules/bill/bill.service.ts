@@ -30,6 +30,7 @@ import { SecretariatService } from '../../shared/entities/secretariat-service.en
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
 import { SecretariatRecord } from '../../shared/entities/secretariat-record.entity';
 import { Document } from '../../shared/entities/document.entity';
+import * as XLSX from 'xlsx';
 import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import {
@@ -2726,6 +2727,62 @@ export class BillService {
         start_date: startOfMonth,
       },
     };
+  }
+
+  /**
+   * Export a report as an .xlsx Buffer. kind: 'minijust' |
+   * 'financial-notary' | 'financial-secretariat' | 'daily-sales'.
+   */
+  async exportReportExcel(
+    businessId: string,
+    kind: string,
+    filters: ReportFiltersDto,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const wb = XLSX.utils.book_new();
+    let rows: Record<string, unknown>[] = [];
+    let summary: Record<string, unknown> | null = null;
+    let filename = `${kind}-report.xlsx`;
+
+    if (kind === 'minijust') {
+      const rep = await this.getMinijustReport(businessId, filters);
+      rows = rep.records as unknown as Record<string, unknown>[];
+      filename = 'minijust-report.xlsx';
+    } else if (kind === 'financial-notary') {
+      const rep = await this.getNotaryFinancialReport(businessId, filters);
+      rows = rep.records as unknown as Record<string, unknown>[];
+      summary = rep.summary as unknown as Record<string, unknown>;
+      filename = 'notary-financial-report.xlsx';
+    } else if (kind === 'financial-secretariat') {
+      const rep = await this.getSecretariatFinancialReport(
+        businessId,
+        filters,
+      );
+      rows = rep.records as unknown as Record<string, unknown>[];
+      summary = rep.summary as unknown as Record<string, unknown>;
+      filename = 'secretariat-financial-report.xlsx';
+    } else if (kind === 'daily-sales') {
+      const rep = await this.getDailySalesReport(businessId, filters);
+      rows = rep.transactions as unknown as Record<string, unknown>[];
+      summary = rep.summary as unknown as Record<string, unknown>;
+      filename = 'daily-sales-report.xlsx';
+    } else {
+      throw new BadRequestException(
+        'Unknown report kind. Use: minijust | financial-notary | financial-secretariat | daily-sales',
+      );
+    }
+
+    if (summary) {
+      const summarySheet = XLSX.utils.json_to_sheet([summary]);
+      XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+    }
+    const dataSheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{}]);
+    XLSX.utils.book_append_sheet(wb, dataSheet, 'Records');
+
+    const buffer = XLSX.write(wb, {
+      type: 'buffer',
+      bookType: 'xlsx',
+    }) as Buffer;
+    return { buffer, filename };
   }
 
   async getAllRefunds(
