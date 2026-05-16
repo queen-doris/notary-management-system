@@ -10,7 +10,11 @@ import {
   Query,
   UseGuards,
   Req,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import 'multer';
 import {
   ApiTags,
   ApiOperation,
@@ -18,6 +22,7 @@ import {
   ApiParam,
   ApiQuery,
   ApiBody,
+  ApiConsumes,
   ApiOkResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -60,6 +65,38 @@ export class BooksController {
       req.user.businessId,
       req.user.businessRoles,
       dto,
+    );
+  }
+
+  @Post('import/notary-records')
+  @Roles(EBusinessRole.OWNER)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Import past notary records from Excel',
+    description:
+      'Upload an .xlsx of historical notary records (Kinyarwanda columns: ITARIKI, IGITABO, NUMERO, VOLUME, AMAZINA, ID, TEL, INYANDIKO, SERVICE, IGICIRO, UMUBARE). Books are auto-assigned/created by name and each book tracker is advanced to the highest imported number so new records continue the sequence. OWNER only.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: 'Import summary (imported / skipped / books / errors)',
+  })
+  @ApiForbiddenResponse({ description: 'Requires OWNER role' })
+  async importNotaryRecords(
+    @Req() req: AuthenticatedRequest,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.booksService.importNotaryRecordsFromExcel(
+      req.user.businessId,
+      req.user.businessRoles,
+      file?.buffer,
     );
   }
 

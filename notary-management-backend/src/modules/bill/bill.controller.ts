@@ -377,6 +377,68 @@ VAT is automatically calculated for NOTARY items.
     return this.billService.serveBill(user.id, user.businessId, dto);
   }
 
+  @Post('serve-secretariat')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Serve the secretariat part of a bill',
+    description:
+      'Creates one SecretariatRecord per secretariat item on a PAID/REJECTED bill. Idempotent: 409 if already served. Reject/refund use the standard /bills/reject and /bills/refunds/process endpoints.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['bill_id'],
+      properties: {
+        bill_id: { type: 'string', format: 'uuid' },
+        notes: { type: 'string' },
+      },
+    },
+  })
+  @ApiCreatedResponse({ description: 'Secretariat records created' })
+  @ApiConflictResponse({
+    description: 'Secretariat records already exist for this bill',
+  })
+  async serveSecretariatBill(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: { bill_id: string; notes?: string },
+  ) {
+    return this.billService.serveSecretariatBill(
+      user.id,
+      user.businessId,
+      dto,
+    );
+  }
+
+  @Get('secretariat-records')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'List secretariat records',
+    description:
+      'Paginated secretariat records with client/date filters.',
+  })
+  @ApiQuery({ name: 'start_date', required: false, example: '2026-01-01' })
+  @ApiQuery({ name: 'end_date', required: false, example: '2026-12-31' })
+  @ApiQuery({ name: 'client_id', required: false })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 50 })
+  @ApiOkResponse({ description: 'Secretariat records retrieved' })
+  async getSecretariatRecords(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('start_date') startDate?: string,
+    @Query('end_date') endDate?: string,
+    @Query('client_id') clientId?: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.billService.getSecretariatRecords(user.businessId, {
+      start_date: startDate,
+      end_date: endDate,
+      client_id: clientId,
+      page,
+      limit,
+    });
+  }
+
   // ==================== Reports ====================
 
   @Get('reports/minijust')

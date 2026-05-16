@@ -77,8 +77,10 @@ export class NotaryRecord extends BaseEntity {
   // ============================================
   // Client Information (Denormalized - captured at service time)
   // ============================================
-  @Column({ type: 'uuid', name: 'client_id' })
-  client_id: string;
+  // Nullable: imported historical records keep only the denormalized
+  // client name/ID, not a live Client row.
+  @Column({ type: 'uuid', name: 'client_id', nullable: true })
+  client_id: string | null;
 
   // Basic Information
   @Column({ type: 'varchar', length: 100, name: 'client_full_name' })
@@ -204,8 +206,8 @@ export class NotaryRecord extends BaseEntity {
   })
   status: RecordStatus;
 
-  @Column({ type: 'uuid', name: 'served_by' })
-  served_by: string;
+  @Column({ type: 'uuid', name: 'served_by', nullable: true })
+  served_by: string | null;
 
   @Column({ type: 'timestamp', name: 'served_date' })
   served_date: Date;
@@ -213,11 +215,16 @@ export class NotaryRecord extends BaseEntity {
   @Column({ type: 'boolean', default: false, name: 'has_documents' })
   has_documents: boolean;
 
+  // True for records imported from a historical Excel/spreadsheet
+  // (no originating bill in this system).
+  @Column({ type: 'boolean', default: false, name: 'is_imported' })
+  is_imported: boolean;
+
   // ============================================
-  // Bill Reference
+  // Bill Reference (nullable: imported historical records have no bill)
   // ============================================
-  @Column({ type: 'uuid', name: 'bill_id' })
-  bill_id: string;
+  @Column({ type: 'uuid', name: 'bill_id', nullable: true })
+  bill_id: string | null;
 
   @Column({ type: 'uuid', name: 'business_id' })
   business_id: string;

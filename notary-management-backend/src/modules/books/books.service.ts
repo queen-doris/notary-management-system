@@ -22,6 +22,7 @@ import { EBusinessRole } from '../../shared/enums/business-role.enum';
 import { RecordStatus } from '../../shared/enums/record-status.enum';
 import { DEFAULT_BOOKS } from '../notary-service/default-notary-services.data';
 import { Generators } from '../../common/utils/generator.utils';
+import * as XLSX from 'xlsx';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -691,6 +692,227 @@ export class BooksService {
     return {
       books: result,
       grand_total: { total_records: grandRecords, total_amount: grandAmount },
+    };
+  }
+
+  // ==================== Import past records from Excel ====================
+
+  private excelDateToJs(value: unknown): Date {
+    if (value instanceof Date) return value;
+    if (typeof value === 'number') {
+      // Excel serial date → JS Date (epoch 1899-12-30)
+      return new Date(Math.round((value - 25569) * 86400 * 1000));
+    }
+    const d = new Date(String(value));
+    return isNaN(d.getTime()) ? new Date() : d;
+  }
+
+  private norm(s: unknown): string {
+    return String(s ?? '')
+      .trim()
+      .toUpperCase();
+  }
+
+  /**
+   * Import historical notary records from an Excel sheet.
+   *
+   * Recognised (Kinyarwanda) headers: ITARIKI(date), IGITABO(book),
+   * NUMERO(number), VOLUME, AMAZINA(client name), ID(client id),
+   * TEL(phone), INYANDIKO(sub-service), SERVICE(category),
+   * IGICIRO(price), UMUBARE(quantity).
+   *
+   * Books are auto-assigned/created by name. After import each touched
+   * book's tracker is advanced to the highest imported number/volume so
+   * newly served records continue the sequence correctly.
+   */
+  async importNotaryRecordsFromExcel(
+    businessId: string,
+    userRoles: EBusinessRole[],
+    fileBuffer: Buffer,
+  ): Promise<{
+    imported: number;
+    skipped: number;
+    books_touched: string[];
+    errors: string[];
+  }> {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
+      throw new ForbiddenException(
+        'Only the business owner can import past records',
+      );
+    }
+    if (!fileBuffer) throw new BadRequestException('No file uploaded');
+
+    let rows: unknown[][];
+    try {
+      const wb = XLSX.read(fileBuffer, { type: 'buffer', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, {
+        header: 1,
+        blankrows: false,
+      }) as unknown[][];
+    } catch {
+      throw new BadRequestException('Could not parse the Excel file');
+    }
+
+    // Locate the header row (the one containing the known column names).
+    const headerIdx = rows.findIndex((r) =>
+      (r || []).some((c) => ['ITARIKI', 'NUMERO', 'AMAZINA'].includes(
+        this.norm(c),
+      )),
+    );
+    if (headerIdx === -1) {
+      throw new BadRequestException(
+        'Could not find a header row (expected columns like ITARIKI, NUMERO, AMAZINA)',
+      );
+    }
+    const header = (rows[headerIdx] as unknown[]).map((c) => this.norm(c));
+    const col = (name: string) => header.indexOf(name);
+    const cI = {
+      date: col('ITARIKI'),
+      book: col('IGITABO'),
+      number: col('NUMERO'),
+      volume: col('VOLUME'),
+      name: col('AMAZINA'),
+      id: col('ID'),
+      tel: col('TEL'),
+      sub: col('INYANDIKO'),
+      service: col('SERVICE'),
+      price: col('IGICIRO'),
+      qty: col('UMUBARE'),
+    };
+
+    const books = await this.bookRepository.find({
+      where: { business_id: businessId },
+    });
+    const bookBySlug = new Map(books.map((b) => [b.slug, b]));
+
+    const errors: string[] = [];
+    let skipped = 0;
+    const toSave: NotaryRecord[] = [];
+    // Track the max (numeric) record number + its volume per book.
+    const bookMax = new Map<string, { num: number; volume: string }>();
+
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const name = String(r[cI.name] ?? '').trim();
+      const numberRaw = r[cI.number];
+      if (!name && (numberRaw === undefined || numberRaw === null)) {
+        skipped++;
+        continue;
+      }
+      try {
+        const bookName = String(r[cI.book] ?? r[cI.service] ?? 'Imported')
+          .trim();
+        const slug = Generators.slugify(bookName) || 'imported';
+        let book = bookBySlug.get(slug);
+        const volume = r[cI.volume] ? String(r[cI.volume]).trim() : null;
+        if (!book) {
+          book = await this.bookRepository.save(
+            this.bookRepository.create({
+              name: bookName || 'Imported',
+              slug,
+              has_volume: !!volume,
+              volume_format: volume
+                ? VolumeFormat.ROMAN
+                : VolumeFormat.NONE,
+              records_per_volume: 0,
+              volume_separator: '/',
+              requires_upi: slug === 'ubutaka' || slug === 'land',
+              increments_volume_on_serve: false,
+              is_active: true,
+              is_custom: true,
+              business_id: businessId,
+            }),
+          );
+          bookBySlug.set(slug, book);
+          await this.bookTrackerRepository.save(
+            this.bookTrackerRepository.create({
+              book_id: book.id,
+              current_volume: volume || undefined,
+              current_number: 0,
+              records_per_volume: 0,
+              records_in_current_volume: 0,
+              is_active: true,
+              business_id: businessId,
+            }),
+          );
+        }
+
+        const num = parseInt(String(numberRaw ?? '0'), 10) || 0;
+        const qty = parseInt(String(r[cI.qty] ?? '1'), 10) || 1;
+        const price = parseInt(String(r[cI.price] ?? '0'), 10) || 0;
+        const displayNumber = volume ? `${num}/${volume}` : `${num}`;
+
+        toSave.push(
+          this.notaryRecordRepository.create({
+            book_type: book.slug,
+            book_id: book.id,
+            volume,
+            record_number: String(num),
+            display_number: displayNumber,
+            service_category: String(
+              r[cI.service] ?? bookName ?? '',
+            ).trim(),
+            sub_service: String(r[cI.sub] ?? '').trim(),
+            amount: price,
+            vat_amount: 0,
+            quantity: qty,
+            unit_price: price,
+            grand_total: price * qty,
+            client_id: null,
+            client_full_name: name,
+            client_id_number: String(r[cI.id] ?? '').trim(),
+            client_phone: r[cI.tel] ? String(r[cI.tel]).trim() : undefined,
+            served_date: this.excelDateToJs(r[cI.date]),
+            status: RecordStatus.ACTIVE,
+            is_imported: true,
+            bill_id: null,
+            served_by: null,
+            business_id: businessId,
+          }),
+        );
+
+        const prev = bookMax.get(book.slug);
+        if (!prev || num > prev.num) {
+          bookMax.set(book.slug, { num, volume: volume || '' });
+        }
+      } catch (e) {
+        errors.push(`Row ${i + 1}: ${(e as Error).message}`);
+      }
+    }
+
+    // Sort by date then number for stable storage order.
+    toSave.sort(
+      (a, b) =>
+        new Date(a.served_date).getTime() -
+          new Date(b.served_date).getTime() ||
+        parseInt(a.record_number, 10) - parseInt(b.record_number, 10),
+    );
+
+    // Bulk insert in chunks.
+    for (let i = 0; i < toSave.length; i += 200) {
+      await this.notaryRecordRepository.save(toSave.slice(i, i + 200));
+    }
+
+    // Advance each touched book's tracker so new serves continue.
+    for (const [slug, max] of bookMax) {
+      const book = bookBySlug.get(slug);
+      if (!book) continue;
+      const tracker = await this.bookTrackerRepository.findOne({
+        where: { business_id: businessId, book_id: book.id },
+      });
+      if (tracker && max.num > tracker.current_number) {
+        tracker.current_number = max.num;
+        if (max.volume) tracker.current_volume = max.volume;
+        await this.bookTrackerRepository.save(tracker);
+      }
+    }
+
+    return {
+      imported: toSave.length,
+      skipped,
+      books_touched: [...bookMax.keys()],
+      errors,
     };
   }
 }

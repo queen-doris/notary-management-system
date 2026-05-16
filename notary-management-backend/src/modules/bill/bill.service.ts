@@ -28,6 +28,7 @@ import { BusinessUser } from '../../shared/entities/business-user.entity';
 import { NotaryService } from '../../shared/entities/notary-service.entity';
 import { SecretariatService } from '../../shared/entities/secretariat-service.entity';
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
+import { SecretariatRecord } from '../../shared/entities/secretariat-record.entity';
 import { Document } from '../../shared/entities/document.entity';
 import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
@@ -100,6 +101,8 @@ export class BillService {
     private secretariatServiceRepository: Repository<SecretariatService>,
     @InjectRepository(NotaryRecord)
     private notaryRecordRepository: Repository<NotaryRecord>,
+    @InjectRepository(SecretariatRecord)
+    private secretariatRecordRepository: Repository<SecretariatRecord>,
     @InjectRepository(Book)
     private bookRepository: Repository<Book>,
     @InjectRepository(Payment)
@@ -1701,6 +1704,145 @@ export class BillService {
         served_date: notaryRecord.served_date,
       },
       bill: { id: bill.id, status: bill.status },
+    };
+  }
+
+  // ==================== Serve Secretariat Bill ====================
+
+  /**
+   * Serve the secretariat portion of a PAID/REJECTED bill: creates one
+   * SecretariatRecord per secretariat item. Idempotent (409 if already
+   * served). Mirrors the notary serve flow (no books/volumes/UPI).
+   */
+  async serveSecretariatBill(
+    userId: string,
+    businessId: string,
+    dto: { bill_id: string; notes?: string },
+  ): Promise<{ message: string; records: any[]; bill: any }> {
+    await this.checkPermission(
+      userId,
+      businessId,
+      [EBusinessRole.OWNER, EBusinessRole.SECRETARIAT],
+      'serve secretariat bills',
+    );
+
+    const bill = await this.billRepository.findOne({
+      where: { id: dto.bill_id, business_id: businessId },
+    });
+    if (!bill) throw new NotFoundException('Bill not found');
+    if (![BillStatus.PAID, BillStatus.REJECTED].includes(bill.status)) {
+      throw new BadRequestException(
+        'Only PAID or REJECTED bills can be served',
+      );
+    }
+    if (!bill.secretariat_total) {
+      throw new BadRequestException(
+        'This bill has no secretariat services to serve',
+      );
+    }
+
+    const existing = await this.secretariatRecordRepository.count({
+      where: { bill_id: bill.id },
+    });
+    if (existing > 0) {
+      throw new ConflictException(
+        'Secretariat records already exist for this bill',
+      );
+    }
+
+    const items = await this.billItemRepository.find({
+      where: { bill_id: bill.id, item_type: ItemType.SECRETARIAT },
+    });
+    if (items.length === 0) {
+      throw new BadRequestException(
+        'No secretariat items found on this bill',
+      );
+    }
+
+    const businessUser = await this.businessUserRepository.findOne({
+      where: { userId, businessId },
+    });
+
+    const created = await this.secretariatRecordRepository.save(
+      items.map((i) =>
+        this.secretariatRecordRepository.create({
+          service_name: i.service_name,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+          subtotal: i.subtotal,
+          total: i.total,
+          client_id: bill.client_id,
+          client_full_name: bill.client_full_name,
+          client_id_number: bill.client_id_number,
+          client_phone: bill.client_phone,
+          client_email: bill.client_email,
+          notes: dto.notes,
+          status: RecordStatus.ACTIVE,
+          served_by: businessUser?.id ?? null,
+          served_date: new Date(),
+          bill_id: bill.id,
+          business_id: businessId,
+        }),
+      ),
+    );
+
+    bill.status = BillStatus.SERVED;
+    await this.billRepository.save(bill);
+
+    return {
+      message: 'Secretariat bill served. Records created.',
+      records: created.map((r) => ({
+        id: r.id,
+        service_name: r.service_name,
+        quantity: r.quantity,
+        total: r.total,
+        served_date: r.served_date,
+      })),
+      bill: { id: bill.id, status: bill.status },
+    };
+  }
+
+  async getSecretariatRecords(
+    businessId: string,
+    filters: {
+      start_date?: string;
+      end_date?: string;
+      client_id?: string;
+      page?: number;
+      limit?: number;
+    },
+  ): Promise<PaginatedResponseDto> {
+    const query = this.secretariatRecordRepository
+      .createQueryBuilder('record')
+      .where('record.business_id = :businessId', { businessId })
+      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
+    if (filters.client_id)
+      query.andWhere('record.client_id = :clientId', {
+        clientId: filters.client_id,
+      });
+    if (filters.start_date)
+      query.andWhere('record.served_date >= :sd', {
+        sd: filters.start_date,
+      });
+    if (filters.end_date)
+      query.andWhere('record.served_date <= :ed', {
+        ed: filters.end_date,
+      });
+
+    const page = filters.page || 1;
+    const limit = filters.limit || 50;
+    const [data, total] = await query
+      .skip((page - 1) * limit)
+      .take(limit)
+      .orderBy('record.served_date', 'DESC')
+      .getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
     };
   }
 
