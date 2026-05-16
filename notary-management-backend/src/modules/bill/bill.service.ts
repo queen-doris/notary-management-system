@@ -694,13 +694,17 @@ export class BillService {
 
   async getBills(
     businessId: string,
-    filters: ReportFiltersDto,
+    filters: ReportFiltersDto & { statusIn?: BillStatus[] },
   ): Promise<PaginatedResponseDto> {
     const query = this.billRepository
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId });
 
-    if (filters.status)
+    if (filters.statusIn?.length)
+      query.andWhere('bill.status IN (:...statusIn)', {
+        statusIn: filters.statusIn,
+      });
+    else if (filters.status)
       query.andWhere('bill.status = :status', { status: filters.status });
     if (filters.bill_type)
       query.andWhere('bill.bill_type = :billType', {
@@ -747,15 +751,45 @@ export class BillService {
           id: bill.id,
           bill_number: bill.bill_number,
           bill_type: bill.bill_type,
-          client_name: bill.client_full_name,
-          grand_total: bill.grand_total,
+          status: bill.status,
+          client: {
+            id: bill.client_id,
+            full_name: bill.client_full_name,
+            id_number: bill.client_id_number,
+            phone: bill.client_phone,
+          },
+          notary_subtotal: bill.notary_subtotal,
+          notary_vat: bill.notary_vat,
           notary_total: bill.notary_total,
           secretariat_total: bill.secretariat_total,
+          grand_total: bill.grand_total,
           amount_paid: bill.amount_paid,
-          status: bill.status,
+          remaining_balance: bill.remaining_balance,
+          refund_status: bill.refund_status,
+          amount_refunded: bill.amount_refunded || 0,
+          profit_after_refund: bill.profit_after_refund,
+          rejection_reason: bill.rejection_reason,
+          rejection_notes: bill.rejection_notes,
           created_at: bill.createdAt,
+          paid_at: bill.paid_at,
           notary_item_count: notaryItems.length,
           secretariat_item_count: secretariatItems.length,
+          notary_items: notaryItems.map((i) => ({
+            service_name: i.service_name,
+            sub_service_name: i.sub_service_name,
+            quantity: i.quantity,
+            unit_price: i.unit_price,
+            subtotal: i.subtotal,
+            vat_amount: i.vat_amount,
+            total: i.total,
+          })),
+          secretariat_items: secretariatItems.map((i) => ({
+            service_name: i.service_name,
+            quantity: i.quantity,
+            unit_price: i.unit_price,
+            subtotal: i.subtotal,
+            total: i.total,
+          })),
         };
       }),
     );
@@ -885,19 +919,22 @@ export class BillService {
       });
       if (!bill) throw new NotFoundException('Bill not found');
 
+      // Only PENDING (unpaid) bills can be modified. PARTIALLY_PAID /
+      // PAID / SERVED / etc. are locked.
       if (bill.status !== BillStatus.PENDING) {
-        throw new BadRequestException('Can only add items to pending bills');
-      }
-
-      // Check permissions based on what we're adding
-      if (dto.notary_items?.length) {
-        await this.checkPermission(
-          userId,
-          businessId,
-          [EBusinessRole.OWNER, EBusinessRole.RECEPTIONIST],
-          'add notary items to bill',
+        throw new BadRequestException(
+          'Items can only be added to a PENDING (not-yet-paid) bill',
         );
       }
+
+      // A bill's single notary service is fixed at creation — it cannot
+      // be added or changed afterwards. Create a new bill instead.
+      if (dto.notary_items?.length) {
+        throw new BadRequestException(
+          'Notary services cannot be added to an existing bill. A bill carries at most one notary service, set when the bill is created.',
+        );
+      }
+
       if (dto.secretariat_items?.length) {
         await this.checkPermission(
           userId,
@@ -909,9 +946,6 @@ export class BillService {
           ],
           'add secretariat items to bill',
         );
-      }
-
-      if (dto.secretariat_items?.length) {
         const business = await this.businessRepository.findOne({
           where: { id: businessId },
         });
@@ -920,17 +954,10 @@ export class BillService {
             'This business does not offer secretariat services',
           );
         }
-      }
-
-      if (dto.notary_items?.length) {
-        const existingNotaryCount = await this.billItemRepository.count({
-          where: { bill_id: bill.id, item_type: ItemType.NOTARY },
-        });
-        if (existingNotaryCount + dto.notary_items.length > 1) {
-          throw new BadRequestException(
-            'A bill may carry at most one notary sub-service',
-          );
-        }
+      } else {
+        throw new BadRequestException(
+          'No secretariat items provided to add',
+        );
       }
 
       let notarySubtotal = bill.notary_subtotal;
@@ -1217,9 +1244,12 @@ export class BillService {
       throw new NotFoundException('Refund request not found');
     }
 
-    if (refund.status !== RefundRequestStatus.PENDING) {
+    if (
+      refund.status !== RefundRequestStatus.PENDING &&
+      refund.status !== RefundRequestStatus.APPROVED
+    ) {
       throw new BadRequestException(
-        `Cannot process refund in ${refund.status} status`,
+        `Cannot process refund in ${refund.status} status (already finalized)`,
       );
     }
 
@@ -1232,12 +1262,21 @@ export class BillService {
 
     const userInfo = await this.getUserInfo(userId, businessId);
 
-    // Validate refund amount
-    if (dto.amount > refund.requested_amount) {
+    // Refunds can be processed incrementally. Accumulate against any
+    // prior partial refunds and never exceed the requested amount.
+    const priorActual = refund.actual_refunded_amount || 0;
+    if (dto.amount <= 0) {
+      throw new BadRequestException('Refund amount must be positive');
+    }
+    const newActual = priorActual + dto.amount;
+    if (newActual > refund.requested_amount) {
       throw new BadRequestException(
-        'Refund amount cannot exceed requested amount',
+        `Refund total ${newActual} would exceed requested ${refund.requested_amount}. Remaining to refund: ${
+          refund.requested_amount - priorActual
+        }`,
       );
     }
+    const fullyRefunded = newActual >= refund.requested_amount;
 
     const businessUser = await this.businessUserRepository.findOne({
       where: {
@@ -1250,38 +1289,51 @@ export class BillService {
       throw new NotFoundException('Business user not found');
     }
 
-    // Update refund record
-    refund.actual_refunded_amount = dto.amount;
-    refund.refund_method = dto.refund_method || '';
-    refund.transaction_reference = dto.transaction_reference || '';
+    // Update refund record (accumulated)
+    refund.actual_refunded_amount = newActual;
+    refund.refund_method = dto.refund_method || refund.refund_method || '';
+    refund.transaction_reference =
+      dto.transaction_reference || refund.transaction_reference || '';
     refund.notes = dto.notes || refund.notes;
-    refund.status = RefundRequestStatus.COMPLETED;
+    refund.status = fullyRefunded
+      ? RefundRequestStatus.COMPLETED
+      : RefundRequestStatus.APPROVED; // APPROVED = partially refunded, more pending
     refund.approved_by = businessUser.id;
     refund.approved_by_name = userInfo.name;
-    refund.approved_at = new Date();
+    refund.approved_at = refund.approved_at || new Date();
     refund.processed_by = businessUser.id;
     refund.processed_by_name = userInfo.name;
     refund.processed_at = new Date();
 
     await this.refundRepository.save(refund);
 
-    // Update bill
-    bill.refund_status = RefundStatus.COMPLETED;
-    bill.amount_refunded = dto.amount;
-    bill.profit_after_refund = bill.amount_paid - dto.amount;
+    // Update bill. Stays in its current (REJECTED) status and the
+    // refund_status stays PENDING until the full requested amount has
+    // been refunded — only then is the bill marked REFUNDED.
+    bill.refund_status = fullyRefunded
+      ? RefundStatus.COMPLETED
+      : RefundStatus.PENDING;
+    bill.amount_refunded = newActual;
+    bill.profit_after_refund = bill.amount_paid - newActual;
     bill.refund_processed_by = businessUser.id;
     bill.refund_processed_at = new Date();
-    bill.status = BillStatus.REFUNDED;
+    if (fullyRefunded) {
+      bill.status = BillStatus.REFUNDED;
+    }
 
     await this.billRepository.save(bill);
 
+    const remaining = refund.requested_amount - newActual;
     return {
-      message: 'Refund processed successfully',
+      message: fullyRefunded
+        ? 'Refund fully processed'
+        : `Partial refund recorded. Remaining to refund: ${remaining}`,
       refund: {
         id: refund.id,
         status: refund.status,
         requested_amount: refund.requested_amount,
         actual_refunded_amount: refund.actual_refunded_amount,
+        remaining_to_refund: remaining,
         refund_method: refund.refund_method,
         transaction_reference: refund.transaction_reference,
         processed_at: refund.processed_at,
@@ -1576,22 +1628,16 @@ export class BillService {
       );
     }
 
-    // Use the confirmed values if supplied, otherwise compute & advance.
-    let volume: string;
-    let recordNumber: number;
-    let displayNumber: string;
-    if (dto.record_number) {
-      recordNumber = dto.record_number;
-      volume = dto.volume || '';
-      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
-      await this.updateBookTracker(businessId, book, volume, recordNumber);
-    } else {
-      const next = await this.previewNextNumber(businessId, book);
-      recordNumber = next.recordNumber;
-      volume = dto.volume ?? next.volume;
-      displayNumber = volume ? `${recordNumber}/${volume}` : `${recordNumber}`;
-      await this.updateBookTracker(businessId, book, volume, recordNumber);
-    }
+    // Each of volume / record_number can be independently overridden by
+    // the owner; whatever they don't confirm falls back to the suggested
+    // (auto-computed) value.
+    const next = await this.previewNextNumber(businessId, book);
+    const recordNumber = dto.record_number ?? next.recordNumber;
+    const volume = dto.volume ?? next.volume ?? '';
+    const displayNumber = volume
+      ? `${recordNumber}/${volume}`
+      : `${recordNumber}`;
+    await this.updateBookTracker(businessId, book, volume, recordNumber);
 
     const businessUser = await this.businessUserRepository.findOne({
       where: { userId: userId, businessId: businessId },
@@ -2434,28 +2480,43 @@ export class BillService {
       })
       .getCount();
 
-    // Monthly revenue
+    // Refunds processed today
+    const todayRefunds = await this.refundRepository
+      .createQueryBuilder('refund')
+      .innerJoin('refund.bill', 'bill')
+      .where('bill.business_id = :businessId', { businessId })
+      .andWhere('refund.processed_at >= :today', { today })
+      .getMany();
+    const todayRefundTotal = todayRefunds.reduce(
+      (s, r) => s + (r.actual_refunded_amount || 0),
+      0,
+    );
+    const todayGross = todayPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    // Monthly revenue — all revenue-bearing bills created this month,
+    // net of refunds (gross = amount_paid, refunds = amount_refunded).
     const monthlyBills = await this.billRepository
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId })
       .andWhere('bill.status IN (:...statuses)', {
-        statuses: [BillStatus.PAID, BillStatus.REFUNDED],
+        statuses: this.REVENUE_STATUSES,
       })
       .andWhere('bill.createdAt >= :startOfMonth', { startOfMonth })
       .getMany();
 
-    let monthlyRevenue = 0;
+    let monthlyGross = 0;
+    let monthlyRefunds = 0;
     for (const bill of monthlyBills) {
-      monthlyRevenue +=
-        bill.status === BillStatus.REFUNDED
-          ? bill.profit_after_refund || 0
-          : bill.amount_paid;
+      monthlyGross += bill.amount_paid || 0;
+      monthlyRefunds += bill.amount_refunded || 0;
     }
 
     return {
       today: {
         bills_created: todayBills.length,
-        revenue: todayPayments.reduce((sum, p) => sum + p.amount, 0),
+        gross_revenue: todayGross,
+        refunds: todayRefundTotal,
+        net_revenue: todayGross - todayRefundTotal,
         payments_count: todayPayments.length,
       },
       pending: {
@@ -2464,7 +2525,9 @@ export class BillService {
         refund_requests: pendingRefundsCount,
       },
       monthly: {
-        revenue: monthlyRevenue,
+        gross_revenue: monthlyGross,
+        refunds: monthlyRefunds,
+        net_revenue: monthlyGross - monthlyRefunds,
         bills_count: monthlyBills.length,
         start_date: startOfMonth,
       },

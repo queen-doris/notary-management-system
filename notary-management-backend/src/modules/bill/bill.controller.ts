@@ -453,7 +453,7 @@ VAT is automatically calculated for NOTARY items.
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<PaginatedResponseDto> {
     return this.billService.getBills(user.businessId, {
-      status: BillStatus.PENDING,
+      statusIn: [BillStatus.PENDING, BillStatus.PARTIALLY_PAID],
       page: 1,
       limit: 100,
     });
