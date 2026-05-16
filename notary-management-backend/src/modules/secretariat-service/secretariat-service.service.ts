@@ -114,15 +114,16 @@ export class SecretariatServiceService {
   async createCustomService(
     businessId: string,
     userId: string,
-    userRoles: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: CreateSecretariatServiceDto,
   ): Promise<SecretariatService> {
     await this.assertSecretariatEnabled(businessId);
-    const isOwner =
-      userRoles === (EBusinessRole.OWNER || EBusinessRole.SECRETARIAT);
-    if (!isOwner)
+    const allowed =
+      userRoles?.includes(EBusinessRole.OWNER) ||
+      userRoles?.includes(EBusinessRole.SECRETARIAT);
+    if (!allowed)
       throw new ForbiddenException(
-        'Only business owner can create custom secretariat services',
+        'Only the business owner or secretariat can create custom secretariat services',
       );
 
     const existing = await this.secretariatServiceRepository.findOne({
@@ -146,14 +147,15 @@ export class SecretariatServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: UpdateSecretariatServiceDto,
   ): Promise<SecretariatService> {
-    const isOwner =
-      userRole === (EBusinessRole.OWNER || EBusinessRole.SECRETARIAT);
-    if (!isOwner)
+    const allowed =
+      userRoles?.includes(EBusinessRole.OWNER) ||
+      userRoles?.includes(EBusinessRole.SECRETARIAT);
+    if (!allowed)
       throw new ForbiddenException(
-        'Only business owner can update secretariat services',
+        'Only the business owner or secretariat can update secretariat services',
       );
 
     const service = await this.getServiceById(id, businessId);
@@ -165,13 +167,14 @@ export class SecretariatServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
   ): Promise<{ message: string }> {
-    const isOwner =
-      userRole === EBusinessRole.OWNER || EBusinessRole.SECRETARIAT;
-    if (!isOwner)
+    const allowed =
+      userRoles?.includes(EBusinessRole.OWNER) ||
+      userRoles?.includes(EBusinessRole.SECRETARIAT);
+    if (!allowed)
       throw new ForbiddenException(
-        'Only business owner can delete secretariat services',
+        'Only the business owner or secretariat can delete secretariat services',
       );
 
     const service = await this.getServiceById(id, businessId);

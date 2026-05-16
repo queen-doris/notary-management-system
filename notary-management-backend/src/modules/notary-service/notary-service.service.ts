@@ -125,10 +125,10 @@ export class NotaryServiceService {
 
   async createCategory(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: CreateNotaryServiceCategoryDto,
   ): Promise<NotaryServiceCategory> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can create service categories',
       );
@@ -163,11 +163,11 @@ export class NotaryServiceService {
 
   async updateCategory(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     categoryRef: string,
     dto: UpdateNotaryServiceCategoryDto,
   ): Promise<NotaryServiceCategory> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can update service categories',
       );
@@ -193,10 +193,10 @@ export class NotaryServiceService {
 
   async deleteCategory(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     categoryRef: string,
   ): Promise<{ message: string }> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can delete service categories',
       );
@@ -266,21 +266,17 @@ export class NotaryServiceService {
   async addSubService(
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     categoryRef: string,
     dto: CreateNotarySubServiceDto,
   ): Promise<NotaryService> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can create custom services',
       );
     }
     const category = await this.resolveCategory(businessId, categoryRef);
-    await this.assertSubServiceUnique(
-      businessId,
-      category.id,
-      dto.sub_service,
-    );
+    await this.assertSubServiceUnique(businessId, category.id, dto.sub_service);
     const bookId = await this.resolveBookId(businessId, dto.book_id);
 
     return this.notaryServiceRepository.save(
@@ -303,20 +299,16 @@ export class NotaryServiceService {
    */
   async createService(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: CreateNotaryServiceDto,
   ): Promise<NotaryService> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can create custom services',
       );
     }
     const category = await this.resolveCategory(businessId, dto.category_id);
-    await this.assertSubServiceUnique(
-      businessId,
-      category.id,
-      dto.sub_service,
-    );
+    await this.assertSubServiceUnique(businessId, category.id, dto.sub_service);
     const bookId = await this.resolveBookId(businessId, dto.book_id);
 
     return this.notaryServiceRepository.save(
@@ -339,13 +331,13 @@ export class NotaryServiceService {
    */
   async createServiceBulk(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: CreateNotaryServiceBulkDto,
   ): Promise<{
     category: NotaryServiceCategory;
     sub_services: NotaryService[];
   }> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can create custom services',
       );
@@ -412,10 +404,10 @@ export class NotaryServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: UpdateNotarySubServiceDto,
   ): Promise<NotaryService> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can update custom services',
       );
@@ -433,9 +425,9 @@ export class NotaryServiceService {
     id: string,
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
   ): Promise<{ message: string }> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can delete custom services',
       );

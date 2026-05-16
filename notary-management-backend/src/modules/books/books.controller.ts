@@ -58,7 +58,7 @@ export class BooksController {
   ) {
     return this.booksService.createBook(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -124,7 +124,7 @@ export class BooksController {
     return this.booksService.updateBookTracker(
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       bookRef,
       dto,
     );
@@ -212,7 +212,7 @@ export class BooksController {
   ) {
     return this.booksService.updateBook(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       bookRef,
       dto,
     );
@@ -233,7 +233,7 @@ export class BooksController {
   ) {
     return this.booksService.deleteBook(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       bookRef,
     );
   }

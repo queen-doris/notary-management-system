@@ -1949,7 +1949,7 @@ export class BillService {
   }> {
     const query = this.billItemRepository
       .createQueryBuilder('item')
-      .innerJoin('item.bill', 'bill')
+      .innerJoinAndSelect('item.bill', 'bill')
       .where('bill.business_id = :businessId', { businessId });
     this.applyItemReportFilters(query, filters, ItemType.NOTARY);
 
@@ -2037,7 +2037,7 @@ export class BillService {
 
     const query = this.billItemRepository
       .createQueryBuilder('item')
-      .innerJoin('item.bill', 'bill')
+      .innerJoinAndSelect('item.bill', 'bill')
       .where('bill.business_id = :businessId', { businessId });
     this.applyItemReportFilters(query, filters, ItemType.SECRETARIAT);
 

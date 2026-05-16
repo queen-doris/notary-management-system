@@ -146,7 +146,8 @@ export class DocumentController {
         },
         metadata: {
           type: 'string',
-          description: 'JSON string of metadata array',
+          description:
+            'JSON string: an array with one entry per uploaded file (same order/length). Each entry: {"record_id":"<uuid>","description":"...","category":"certificate","upi":"optional"}. Example: [{"record_id":"605efe42-4a67-4250-80ad-825050e38c1a","description":"Diploma","category":"certificate"}]',
         },
       },
     },
@@ -165,17 +166,23 @@ export class DocumentController {
       throw new BadRequestException('Metadata is required');
     }
 
+    if (!files || files.length === 0) {
+      throw new BadRequestException('At least one file is required');
+    }
+
     let metadataList: BulkUploadItemDto[];
     try {
       metadataList = JSON.parse(metadata) as BulkUploadItemDto[];
-    } catch (error) {
-      throw new BadRequestException('Invalid JSON format for metadata');
+    } catch {
+      throw new BadRequestException(
+        'metadata must be a valid JSON array, e.g. [{"record_id":"<uuid>","description":"Diploma","category":"certificate"}] — one entry per file',
+      );
     }
 
     // Validate that metadata array matches files array
     if (!Array.isArray(metadataList) || metadataList.length !== files.length) {
       throw new BadRequestException(
-        'Metadata must be an array with the same length as files',
+        `metadata must be a JSON array with exactly ${files.length} item(s) — one per uploaded file, in the same order`,
       );
     }
 

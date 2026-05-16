@@ -62,7 +62,7 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.createCategory(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -99,7 +99,7 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.updateCategory(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       categoryRef,
       dto,
     );
@@ -119,7 +119,7 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.deleteCategory(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       categoryRef,
     );
   }
@@ -142,7 +142,7 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.createServiceBulk(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -163,7 +163,7 @@ export class NotaryServiceController {
   ) {
     return this.notaryServiceService.createService(
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -241,7 +241,7 @@ export class NotaryServiceController {
     return this.notaryServiceService.addSubService(
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       categoryRef,
       dto,
     );
@@ -266,7 +266,7 @@ export class NotaryServiceController {
       id,
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -287,7 +287,7 @@ export class NotaryServiceController {
       id,
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
     );
   }
 }

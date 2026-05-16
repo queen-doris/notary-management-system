@@ -191,30 +191,6 @@ VAT is automatically calculated for NOTARY items.
     return this.billService.getBills(user.businessId, filters);
   }
 
-  @Get(':id')
-  @Roles(
-    EBusinessRole.OWNER,
-    EBusinessRole.ACCOUNTANT,
-    EBusinessRole.RECEPTIONIST,
-    EBusinessRole.SECRETARIAT,
-  )
-  @ApiOperation({
-    summary: 'Get bill by ID',
-    description: 'Retrieves a single bill with all details',
-  })
-  @ApiParam({ name: 'id', description: 'Bill UUID', type: 'string' })
-  @ApiOkResponse({
-    description: 'Bill retrieved successfully',
-    type: BillResponseDto,
-  })
-  @ApiNotFoundResponse({ description: 'Bill not found' })
-  async getBillById(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<BillResponseDto> {
-    return this.billService.getBillById(id, user.businessId);
-  }
-
   // ==================== Payment Management ====================
 
   @Post('payments')
@@ -236,20 +212,6 @@ VAT is automatically calculated for NOTARY items.
     return this.billService.recordPayment(user.id, user.businessId, dto);
   }
 
-  @Get(':id/payments')
-  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
-  @ApiOperation({
-    summary: 'Get payment history',
-    description: 'Retrieves all payments for a bill',
-  })
-  @ApiParam({ name: 'id', description: 'Bill UUID', type: 'string' })
-  @ApiOkResponse({ description: 'Payment history retrieved successfully' })
-  async getPaymentHistory(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<{ bill: any; payments: any[] }> {
-    return this.billService.getPaymentHistory(id, user.businessId);
-  }
 
   // ==================== Status Management ====================
 
@@ -707,5 +669,47 @@ VAT is automatically calculated for NOTARY items.
       page: query.page,
       limit: query.limit,
     });
+  }
+
+  // ==================== Single Bill (catch-all :id routes, declared
+  // LAST so static paths like /notary-records resolve first) ============
+
+  @Get(':id/payments')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.ACCOUNTANT)
+  @ApiOperation({
+    summary: 'Get payment history',
+    description: 'Retrieves all payments for a bill',
+  })
+  @ApiParam({ name: 'id', description: 'Bill UUID', type: 'string' })
+  @ApiOkResponse({ description: 'Payment history retrieved successfully' })
+  async getPaymentHistory(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<{ bill: any; payments: any[] }> {
+    return this.billService.getPaymentHistory(id, user.businessId);
+  }
+
+  @Get(':id')
+  @Roles(
+    EBusinessRole.OWNER,
+    EBusinessRole.ACCOUNTANT,
+    EBusinessRole.RECEPTIONIST,
+    EBusinessRole.SECRETARIAT,
+  )
+  @ApiOperation({
+    summary: 'Get bill by ID',
+    description: 'Retrieves a single bill with all details',
+  })
+  @ApiParam({ name: 'id', description: 'Bill UUID', type: 'string' })
+  @ApiOkResponse({
+    description: 'Bill retrieved successfully',
+    type: BillResponseDto,
+  })
+  @ApiNotFoundResponse({ description: 'Bill not found' })
+  async getBillById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<BillResponseDto> {
+    return this.billService.getBillById(id, user.businessId);
   }
 }

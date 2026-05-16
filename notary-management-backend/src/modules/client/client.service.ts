@@ -260,7 +260,7 @@ export class ClientService {
     clientId: string,
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: UpdateClientDto,
   ): Promise<ClientResponseDto> {
     const allowedRoles = [
@@ -269,7 +269,7 @@ export class ClientService {
       EBusinessRole.SECRETARIAT,
     ];
 
-    if (!allowedRoles.includes(userRole)) {
+    if (!userRoles?.some((r) => allowedRoles.includes(r))) {
       throw new ForbiddenException('Only authorized staff can verify clients');
     }
 
@@ -341,7 +341,7 @@ export class ClientService {
     clientId: string,
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     notes?: string,
   ): Promise<ClientResponseDto> {
     // 3. Find client safely (with soft delete protection)
@@ -385,7 +385,7 @@ export class ClientService {
   async deactivateClient(
     clientId: string,
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
   ): Promise<{ message: string }> {
     const client = await this.clientRepository.findOne({
       where: { id: clientId, business: { id: businessId } },

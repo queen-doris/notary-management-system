@@ -105,7 +105,7 @@ export class SecretariatServiceController {
     return this.secretariatServiceService.createCustomService(
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -131,7 +131,7 @@ export class SecretariatServiceController {
       id,
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -155,7 +155,7 @@ export class SecretariatServiceController {
       id,
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
     );
   }
 }

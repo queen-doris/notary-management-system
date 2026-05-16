@@ -171,10 +171,10 @@ export class BooksService {
 
   async createBook(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     dto: CreateBookDto,
   ): Promise<{ book: Book; tracker: BookTracker }> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException('Only business owner can create books');
     }
 
@@ -241,11 +241,11 @@ export class BooksService {
 
   async updateBook(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     bookRef: string,
     dto: UpdateBookDto,
   ): Promise<Book> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException('Only business owner can update books');
     }
     const book = await this.resolveBook(businessId, bookRef);
@@ -269,10 +269,10 @@ export class BooksService {
 
   async deleteBook(
     businessId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     bookRef: string,
   ): Promise<{ message: string }> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException('Only business owner can delete books');
     }
     const book = await this.resolveBook(businessId, bookRef);
@@ -311,11 +311,11 @@ export class BooksService {
   async updateBookTracker(
     businessId: string,
     userId: string,
-    userRole: EBusinessRole,
+    userRoles: EBusinessRole[],
     bookRef: string,
     dto: UpdateBookTrackerDto,
   ): Promise<BookTracker> {
-    if (userRole !== EBusinessRole.OWNER) {
+    if (!userRoles?.includes(EBusinessRole.OWNER)) {
       throw new ForbiddenException(
         'Only business owner can update book trackers',
       );

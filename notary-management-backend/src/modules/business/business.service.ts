@@ -830,39 +830,39 @@ export class BusinessService {
     ];
 
     const filteredRoles = role
-      ? roleMap.filter((r) => r.key === role.replace(' ', '_'))
+      ? roleMap.filter(
+          (r) => r.role === role || r.key === role.replace(' ', '_'),
+        )
       : roleMap;
 
-    const results = await Promise.all(
-      filteredRoles.map(async ({ key, role }) => {
-        const qb = this.businessUserRepository
-          .createQueryBuilder('businessUser')
-          .leftJoinAndSelect('businessUser.user', 'user')
-          .where('businessUser.businessId = :businessId', {
-            businessId: business.id,
-          })
-          .andWhere(':role = ANY(businessUser.roles)', { role });
+    // Load all members for the business once, then group/paginate in
+    // memory. Staff lists are small, and this avoids fragile raw
+    // `= ANY(enum[])` SQL that errors on enum-array columns.
+    const allMembers = await this.businessUserRepository.find({
+      where: { businessId: business.id },
+      relations: ['user'],
+      order: { createdAt: 'DESC' },
+    });
 
-        const [data, total] = await qb
-          .orderBy('businessUser.createdAt', 'DESC')
-          .skip(skip)
-          .take(limit)
-          .getManyAndCount();
-
-        return {
-          key,
-          data,
-          pagination: {
-            page,
-            limit,
-            total,
-            totalPages: Math.ceil(total / limit),
-            hasNext: page < Math.ceil(total / limit),
-            hasPrev: page > 1,
-          },
-        };
-      }),
-    );
+    const results = filteredRoles.map(({ key, role }) => {
+      const matching = allMembers.filter((m) =>
+        (m.roles || []).includes(role),
+      );
+      const total = matching.length;
+      const data = matching.slice(skip, skip + limit);
+      return {
+        key,
+        data,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      };
+    });
 
     const result = results.reduce<Record<string, unknown>>((acc, entry) => {
       acc[entry.key] = {

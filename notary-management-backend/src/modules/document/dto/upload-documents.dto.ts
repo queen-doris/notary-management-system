@@ -6,6 +6,7 @@ import {
   IsUUID,
   IsBoolean,
   MaxLength,
+  Allow,
 } from 'class-validator';
 import { DocumentCategory } from '../../../shared/enums/document-status.enum';
 
@@ -19,7 +20,10 @@ export class UploadDocumentDto {
     type: 'string',
     format: 'binary',
   })
-  file: any;
+  // Handled by @UploadedFile(); @Allow() so the global
+  // forbidNonWhitelisted ValidationPipe doesn't reject the field.
+  @Allow()
+  file?: any;
 
   @ApiPropertyOptional({
     description: 'Document category',

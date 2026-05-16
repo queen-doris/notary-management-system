@@ -195,7 +195,7 @@ export class ClientController {
       id,
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       dto,
     );
   }
@@ -228,7 +228,7 @@ export class ClientController {
       id,
       req.user.businessId,
       req.user.id,
-      req.user.role,
+      req.user.businessRoles,
       notes,
     );
   }
@@ -252,7 +252,7 @@ export class ClientController {
     return this.clientService.deactivateClient(
       id,
       req.user.businessId,
-      req.user.role,
+      req.user.businessRoles,
     );
   }
 }
