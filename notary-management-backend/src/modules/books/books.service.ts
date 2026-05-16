@@ -727,6 +727,7 @@ export class BooksService {
     dry_run: boolean;
     imported: number;
     skipped: number;
+    skipped_existing: number;
     books_touched: string[];
     errors: string[];
     sample?: unknown[];
@@ -782,8 +783,41 @@ export class BooksService {
     });
     const bookBySlug = new Map(books.map((b) => [b.slug, b]));
 
+    // Synonyms so a sheet's "UBUTAKA" maps to the seeded land book
+    // instead of fragmenting into a new "ubutaka" book.
+    const SYNONYMS: Record<string, string> = {
+      ubutaka: 'land',
+      land: 'land',
+      umutungo: 'land',
+    };
+    const resolveExistingBook = (slug: string): Book | undefined => {
+      if (bookBySlug.has(slug)) return bookBySlug.get(slug);
+      const syn = SYNONYMS[slug];
+      if (syn && bookBySlug.has(syn)) return bookBySlug.get(syn);
+      // Fall back to an existing book whose slug/name contains the token.
+      return books.find(
+        (b) =>
+          b.slug.includes(slug) ||
+          slug.includes(b.slug) ||
+          b.name.toLowerCase().includes(slug),
+      );
+    };
+
+    // Natural-key set of records that already exist, so re-importing the
+    // same sheet (or overlapping rows) doesn't duplicate.
+    const existing = await this.notaryRecordRepository.find({
+      where: { business_id: businessId },
+      select: { book_id: true, volume: true, record_number: true },
+    });
+    const seenKeys = new Set(
+      existing.map(
+        (e) => `${e.book_id ?? ''}|${e.volume ?? ''}|${e.record_number}`,
+      ),
+    );
+
     const errors: string[] = [];
     let skipped = 0;
+    let skippedExisting = 0;
     const toSave: NotaryRecord[] = [];
     // Track the max (numeric) record number + its volume per book.
     const bookMax = new Map<string, { num: number; volume: string }>();
@@ -801,8 +835,8 @@ export class BooksService {
           r[cI.book] ?? r[cI.service] ?? 'Imported',
         ).trim();
         const slug = Generators.slugify(bookName) || 'imported';
-        let book = bookBySlug.get(slug);
-        const volume = r[cI.volume] ? String(r[cI.volume]).trim() : null;
+        let book = resolveExistingBook(slug);
+        const volume = r[cI.volume] ? String(r[cI.volume]).trim() : '';
         if (!book) {
           const draft = this.bookRepository.create({
             name: bookName || 'Imported',
@@ -843,6 +877,15 @@ export class BooksService {
         const qty = parseInt(String(r[cI.qty] ?? '1'), 10) || 1;
         const price = parseInt(String(r[cI.price] ?? '0'), 10) || 0;
         const displayNumber = volume ? `${num}/${volume}` : `${num}`;
+
+        // Skip rows that already exist (DB) or are duplicated within
+        // the file — keyed by book + volume + number.
+        const key = `${book.id}|${volume}|${num}`;
+        if (seenKeys.has(key)) {
+          skippedExisting++;
+          continue;
+        }
+        seenKeys.add(key);
 
         toSave.push(
           this.notaryRecordRepository.create({
@@ -892,6 +935,7 @@ export class BooksService {
         dry_run: true,
         imported: 0,
         skipped,
+        skipped_existing: skippedExisting,
         books_touched: [...bookMax.keys()],
         errors,
         sample: toSave.slice(0, 5).map((r) => ({
@@ -933,6 +977,7 @@ export class BooksService {
       dry_run: false,
       imported: toSave.length,
       skipped,
+      skipped_existing: skippedExisting,
       books_touched: [...bookMax.keys()],
       errors,
     };
