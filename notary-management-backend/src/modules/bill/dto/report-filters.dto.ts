@@ -9,7 +9,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { Type } from 'class-transformer';
 import {
   BillStatus,
   BillType,
@@ -123,14 +123,11 @@ export class ReportFiltersDto {
 
   @ApiPropertyOptional({
     description:
-      'Minijust export only: include the formatted cover letter. Default true. Set false to get just the records table.',
-    default: true,
+      'Minijust export only: include the formatted cover letter. Default true. Pass "false" to get just the notary-profile + records table.',
+    enum: ['true', 'false'],
+    default: 'true',
   })
   @IsOptional()
-  @Transform(({ value }) => {
-    if (typeof value === 'boolean') return value;
-    const v = String(value).trim().toLowerCase();
-    return !(v === 'false' || v === '0' || v === 'no' || v === '');
-  })
-  include_letter?: boolean;
+  @IsString()
+  include_letter?: string;
 }

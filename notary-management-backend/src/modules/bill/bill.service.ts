@@ -2993,6 +2993,42 @@ export class BillService {
     return `igihembwe cya ${names[q - 1] || q} ${s.getFullYear()}`;
   }
 
+  /** Notary identity block used on the letter and every records page. */
+  private notaryHeaderLines(business: Business | null): string[] {
+    const name =
+      business?.notary_full_name || business?.businessName || 'Noteri';
+    const title = business?.notary_title || 'Noteri Wikorera';
+    const district = business?.district || '';
+    const sector = business?.sector || '';
+    const phone = business?.phone || '';
+    const email = business?.email || '';
+    const lines = [
+      name,
+      `${title}${district ? ` Mu karere ka ${district}` : ''}`,
+    ];
+    if (sector) lines.push(`Umurenge wa ${sector}`);
+    if (phone) lines.push(`Tel ${phone}`);
+    if (email) lines.push(`Email: ${email}`);
+    if (business?.notary_oath_date) {
+      lines.push(
+        `Itariki yo Kurahira: ${this.rwDate(business.notary_oath_date)}`,
+      );
+    }
+    return lines;
+  }
+
+  /** Kinyarwanda period phrase, e.g. "igihembwe cya kane 2025". */
+  private periodPhrase(filters: ReportFiltersDto): string {
+    return (
+      this.quarterLabel(filters) ||
+      (filters.start_date && filters.end_date
+        ? `kuva ${this.rwDate(filters.start_date)} kugeza ${this.rwDate(
+            filters.end_date,
+          )}`
+        : 'iki gihe')
+    );
+  }
+
   /** Build the Minijust cover letter from the business notary profile. */
   private buildMinijustLetter(
     business: Business | null,
@@ -3003,30 +3039,11 @@ export class BillService {
     const title = business?.notary_title || 'Noteri Wikorera';
     const district = business?.district || '';
     const sector = business?.sector || '';
-    const phone = business?.phone || '';
-    const email = business?.email || '';
     const place = sector || district || '';
     const today = this.rwDate(new Date());
-    const periodTxt =
-      this.quarterLabel(filters) ||
-      (filters.start_date && filters.end_date
-        ? `kuva ${this.rwDate(filters.start_date)} kugeza ${this.rwDate(
-            filters.end_date,
-          )}`
-        : 'iki gihe');
+    const periodTxt = this.periodPhrase(filters);
 
-    const headerLines = [
-      name,
-      `${title}${district ? ` Mu karere ka ${district}` : ''}`,
-    ];
-    if (sector) headerLines.push(`Umurenge wa ${sector}`);
-    if (phone) headerLines.push(`Tel ${phone}`);
-    if (email) headerLines.push(`Email: ${email}`);
-    if (business?.notary_oath_date) {
-      headerLines.push(
-        `Itariki yo Kurahira: ${this.rwDate(business.notary_oath_date)}`,
-      );
-    }
+    const headerLines = this.notaryHeaderLines(business);
 
     return {
       headerLines,
@@ -3078,13 +3095,18 @@ export class BillService {
       );
     }
 
-    const totalsRow =
-      kind === 'minijust'
-        ? null
-        : computeTotalsRow(columns, rows, language);
+    const isMinijust = kind === 'minijust';
 
-    const includeLetter =
-      kind === 'minijust' && filters.include_letter !== false;
+    const totalsRow = isMinijust
+      ? null
+      : computeTotalsRow(columns, rows, language);
+
+    // "false" (string) reliably excludes the letter regardless of the
+    // global ValidationPipe boolean coercion.
+    const letterExcluded =
+      String(filters.include_letter ?? '').trim().toLowerCase() === 'false';
+    const includeLetter = isMinijust && !letterExcluded;
+
     let letter: ReportLetter | null = includeLetter
       ? this.buildMinijustLetter(business, filters)
       : null;
@@ -3096,16 +3118,26 @@ export class BillService {
     // Don't show the other service line in a single-service report.
     const trimmedSummary = this.trimSummaryForKind(kind, summary);
 
+    // Minijust mirrors the official document: notary identity header on
+    // every records page + a Kinyarwanda title, plain bordered table.
+    const minijustTitle = `Raporo y'abakiriya nakiriye mu ${this.periodPhrase(
+      filters,
+    )}`;
+
     const result = await renderReport(fmt, {
-      title,
+      title: isMinijust ? minijustTitle : title,
       language,
       columns,
       rows,
-      summary: kind === 'minijust' ? null : trimmedSummary,
+      summary: isMinijust ? null : trimmedSummary,
       totalsRow,
       letter,
       baseName,
-      subtitleLines,
+      subtitleLines: isMinijust ? [] : subtitleLines,
+      pageHeaderLines: isMinijust
+        ? this.notaryHeaderLines(business)
+        : undefined,
+      tableStyle: isMinijust ? 'plain' : 'styled',
     });
     return result;
   }

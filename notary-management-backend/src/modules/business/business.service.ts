@@ -33,6 +33,7 @@ import { BusinessQueryDto } from './dto/business-query.dto';
 import { BooksService } from '../books/books.service';
 import { NotaryServiceService } from '../notary-service/notary-service.service';
 import { SecretariatServiceService } from '../secretariat-service/secretariat-service.service';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 type RegisterBusinessDto = Partial<Business> & {
   businessRegistrationNumber: string;
@@ -62,6 +63,7 @@ export class BusinessService {
     private readonly notaryServiceService: NotaryServiceService,
     @Inject(forwardRef(() => SecretariatServiceService))
     private readonly secretariatServiceService: SecretariatServiceService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   async registerBusiness(
@@ -1444,6 +1446,34 @@ export class BusinessService {
         notary_letter_recipient: saved.notary_letter_recipient,
         notary_signature_url: saved.notary_signature_url,
       },
+      path: '',
+      timestamp: new Date().toISOString(),
+    };
+  };
+
+  /** Upload a signature image file and store its URL on the profile. */
+  uploadNotarySignature = async (
+    userId: string,
+    file: Express.Multer.File,
+  ): Promise<IResponse> => {
+    if (!file) {
+      throw new BadRequestException('No signature file provided');
+    }
+    const business = await this.resolvePrimaryBusiness(userId);
+    const uploaded = (await this.cloudinaryService.uploadImage(file)) as {
+      secure_url?: string;
+      url?: string;
+    };
+    const url = uploaded?.secure_url || uploaded?.url;
+    if (!url) {
+      throw new BadRequestException('Signature upload failed');
+    }
+    business.notary_signature_url = url;
+    await this.businessRepository.save(business);
+    return {
+      status: 'SUCCESS',
+      message: 'Signature uploaded',
+      data: { notary_signature_url: url },
       path: '',
       timestamp: new Date().toISOString(),
     };

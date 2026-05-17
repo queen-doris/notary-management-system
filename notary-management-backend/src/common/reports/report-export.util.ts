@@ -60,6 +60,17 @@ export interface ReportExportPayload {
   baseName: string;
   /** Sub-title lines under the title (period, business name, etc.). */
   subtitleLines?: string[];
+  /**
+   * Notary identity lines printed at the top of EVERY records page
+   * (Minijust + notary-records), exactly like the official document.
+   */
+  pageHeaderLines?: string[];
+  /**
+   * 'plain' = official-document look (white cells, thin borders, bold
+   * header, no shading/zebra). 'styled' = accented look for internal
+   * financial/daily reports. Default 'styled'.
+   */
+  tableStyle?: 'plain' | 'styled';
 }
 
 export interface ReportExportResult {
@@ -571,53 +582,110 @@ function buildPdf(p: ReportExportPayload): Promise<Buffer> {
     doc.addPage();
   }
 
-  // ---- Title block ----
-  doc
-    .fillColor(ACCENT)
-    .font('Helvetica-Bold')
-    .fontSize(16)
-    .text(p.title, left, undefined, { width: usable, align: 'center' });
-  doc.fillColor('#444').font('Helvetica').fontSize(9.5);
-  for (const s of p.subtitleLines || []) {
-    doc.text(s, left, undefined, { width: usable, align: 'center' });
-  }
-  doc.moveDown(0.3);
-  const ruleY = doc.y;
-  doc
-    .lineWidth(1)
-    .strokeColor(ACCENT)
-    .moveTo(left, ruleY)
-    .lineTo(right, ruleY)
-    .stroke();
-  doc.fillColor('#000').moveDown(0.7);
+  const plain = p.tableStyle === 'plain' || !!p.pageHeaderLines;
 
-  // ---- Summary block ----
-  if (p.summary && Object.keys(p.summary).length) {
-    doc
-      .fillColor(ACCENT)
-      .font('Helvetica-Bold')
-      .fontSize(12)
-      .text(T.summary[p.language], left);
-    doc.moveDown(0.35);
-    for (const [k, v] of Object.entries(p.summary)) {
-      const val = MONEY_KEYS.has(k) ? fmtMoney(v) : String(v ?? '');
+  // Official-document header (notary identity) repeated on every records
+  // page, then a centered title + rule — exactly like the Minijust doc.
+  const drawProfileHeader = (): number => {
+    let yy = doc.page.margins.top;
+    doc.fillColor('#000');
+    (p.pageHeaderLines || []).forEach((l, i) => {
       doc
-        .font('Helvetica')
-        .fontSize(10)
-        .fillColor('#555')
-        .text(`${labelFor(k, p.language)}:  `, left, undefined, {
-          continued: true,
-        });
-      doc.font('Helvetica-Bold').fillColor('#000').text(val);
-      doc.moveDown(0.18);
+        .font(i === 0 ? 'Helvetica-Bold' : 'Helvetica')
+        .fontSize(i === 0 ? 11 : 10)
+        .text(l, left, yy);
+      yy = doc.y;
+    });
+    yy += 14;
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(13)
+      .fillColor('#000')
+      .text(p.title, left, yy, { width: usable, align: 'center' });
+    yy = doc.y + 4;
+    doc
+      .lineWidth(0.75)
+      .strokeColor('#000')
+      .moveTo(left, yy)
+      .lineTo(right, yy)
+      .stroke();
+    return yy + 8;
+  };
+
+  // Accented header + summary card for internal financial/daily reports.
+  const drawReportHeaderOnce = (): number => {
+    const bannerH = 34 + (p.subtitleLines?.length || 0) * 13;
+    doc.save().roundedRect(left, doc.y, usable, bannerH, 5).fill(ACCENT);
+    doc.restore();
+    let yy = doc.page.margins.top + 9;
+    doc
+      .fillColor('#FFFFFF')
+      .font('Helvetica-Bold')
+      .fontSize(17)
+      .text(p.title, left, yy, { width: usable, align: 'center' });
+    yy = doc.y + 1;
+    doc.font('Helvetica').fontSize(9.5).fillColor('#DCE6F5');
+    for (const s of p.subtitleLines || []) {
+      doc.text(s, left, yy, { width: usable, align: 'center' });
+      yy = doc.y;
     }
-    doc.fillColor('#000').moveDown(0.7);
-  }
+    let cursor = doc.page.margins.top + bannerH + 14;
+
+    if (p.summary && Object.keys(p.summary).length) {
+      const entries = Object.entries(p.summary);
+      const padB = 12;
+      const lineH = 18;
+      const titleH = 22;
+      const boxH = titleH + entries.length * lineH + padB;
+      doc
+        .save()
+        .roundedRect(left, cursor, usable, boxH, 4)
+        .fillAndStroke('#F4F7FB', ACCENT)
+        .restore();
+      // accent left bar
+      doc.save().rect(left, cursor, 4, boxH).fill(ACCENT).restore();
+      doc
+        .fillColor(ACCENT)
+        .font('Helvetica-Bold')
+        .fontSize(12)
+        .text(T.summary[p.language], left + 14, cursor + 8);
+      let ry = cursor + titleH + 4;
+      for (const [k, v] of entries) {
+        const val = MONEY_KEYS.has(k) ? fmtMoney(v) : String(v ?? '');
+        doc
+          .font('Helvetica')
+          .fontSize(10)
+          .fillColor('#555')
+          .text(`${labelFor(k, p.language)}`, left + 14, ry, {
+            width: usable * 0.6,
+          });
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(10.5)
+          .fillColor('#000')
+          .text(val, left + usable * 0.6, ry, {
+            width: usable * 0.4 - 14,
+            align: 'right',
+          });
+        ry += lineH;
+      }
+      cursor += boxH + 16;
+    }
+    doc.fillColor('#000');
+    return cursor;
+  };
 
   // ---- Table ----
   const cols = p.columns;
   if (!cols.length || !p.rows.length) {
-    doc.fillColor('#000').fontSize(10).text(T.noRecords[p.language], left);
+    const startY = p.pageHeaderLines
+      ? drawProfileHeader()
+      : drawReportHeaderOnce();
+    doc
+      .fillColor('#000')
+      .font('Helvetica')
+      .fontSize(10)
+      .text(T.noRecords[p.language], left, startY);
     doc.end();
     return done;
   }
@@ -730,45 +798,54 @@ function buildPdf(p: ReportExportPayload): Promise<Buffer> {
   };
 
   const headerCells = cols.map((c) => c.label[p.language]);
-  let y = doc.y;
-  y = drawRow(y, headerCells, {
-    bold: true,
-    fill: '#e6e6e6',
-    fontSize: headerFontSize,
-  });
+  const headerFill = plain ? undefined : '#E6E6E6';
+  const drawColumnHeader = (yy: number): number =>
+    drawRow(yy, headerCells, {
+      bold: true,
+      fill: headerFill,
+      fontSize: headerFontSize,
+    });
+
+  const startTablePage = (first: boolean): number => {
+    if (!first) doc.addPage();
+    if (p.pageHeaderLines && p.pageHeaderLines.length) {
+      return drawColumnHeader(drawProfileHeader());
+    }
+    if (first) {
+      return drawColumnHeader(drawReportHeaderOnce());
+    }
+    return drawColumnHeader(doc.page.margins.top);
+  };
+
+  let y = startTablePage(true);
 
   let zebra = false;
   for (const r of p.rows) {
     const cells = cols.map((c) => formatCell(c, r[c.key], p.language));
     const projected = measureRow(cells, bodyFontSize, false);
     if (y + projected > bottom) {
-      doc.addPage();
-      y = doc.page.margins.top;
-      y = drawRow(y, headerCells, {
-        bold: true,
-        fill: '#e6e6e6',
-        fontSize: headerFontSize,
-      });
+      y = startTablePage(false);
     }
     y = drawRow(y, cells, {
       fontSize: bodyFontSize,
-      fill: zebra ? '#f5f5f5' : undefined,
+      fill: !plain && zebra ? '#F5F5F5' : undefined,
     });
     zebra = !zebra;
   }
 
   if (p.totalsRow) {
     const cells = cols.map((c) =>
-      c.key in p.totalsRow! ? formatCell(c, p.totalsRow![c.key], p.language) : '',
+      c.key in p.totalsRow!
+        ? formatCell(c, p.totalsRow![c.key], p.language)
+        : '',
     );
     const projected = measureRow(cells, headerFontSize, true);
     if (y + projected > bottom) {
-      doc.addPage();
-      y = doc.page.margins.top;
+      y = startTablePage(false);
     }
     drawRow(y, cells, {
       bold: true,
-      fill: '#dcdcdc',
+      fill: plain ? '#EAEAEA' : '#DCDCDC',
       fontSize: headerFontSize,
     });
   }

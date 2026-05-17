@@ -549,15 +549,20 @@ export class BooksService {
       bill_status: r.status,
     }));
 
-    const subtitleLines: string[] = [];
-    if (business?.businessName) subtitleLines.push(business.businessName);
-    if (filters.start_date || filters.end_date)
-      subtitleLines.push(
-        `${filters.start_date || '...'} → ${filters.end_date || '...'}`,
-      );
+    // Notary identity header on every records page (official-doc look).
+    const pageHeaderLines: string[] = [
+      business?.notary_full_name || business?.businessName || 'Noteri',
+      `${business?.notary_title || 'Noteri Wikorera'}${
+        business?.district ? ` Mu karere ka ${business.district}` : ''
+      }`,
+    ];
+    if (business?.sector)
+      pageHeaderLines.push(`Umurenge wa ${business.sector}`);
+    if (business?.phone) pageHeaderLines.push(`Tel ${business.phone}`);
+    if (business?.email) pageHeaderLines.push(`Email: ${business.email}`);
 
     return renderReport(filters.format || 'xlsx', {
-      title: language === 'rw' ? "Raporo y'inyandiko" : 'Notary Records',
+      title: language === 'rw' ? "Raporo y'inyandiko nakoze" : 'Notary Records',
       language,
       columns,
       rows,
@@ -565,7 +570,9 @@ export class BooksService {
       totalsRow: computeTotalsRow(columns, rows, language),
       letter: null,
       baseName: 'notary-records',
-      subtitleLines,
+      subtitleLines: [],
+      pageHeaderLines,
+      tableStyle: 'plain',
     });
   }
 

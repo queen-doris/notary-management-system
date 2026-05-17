@@ -10,6 +10,7 @@ import { BusinessUserModule } from '../business-user/business-user.module';
 import { BooksModule } from '../books/books.module';
 import { NotaryServiceModule } from '../notary-service/notary-service.module';
 import { SecretariatServiceModule } from '../secretariat-service/secretariat-service.module';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SecretariatServiceModule } from '../secretariat-service/secretariat-ser
     forwardRef(() => BooksModule),
     forwardRef(() => NotaryServiceModule),
     forwardRef(() => SecretariatServiceModule),
+    CloudinaryModule,
   ],
   controllers: [BusinessController],
   providers: [BusinessService],

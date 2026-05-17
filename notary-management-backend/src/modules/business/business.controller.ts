@@ -17,7 +17,11 @@ import {
   ParseUUIDPipe,
   ParseIntPipe,
   ParseBoolPipe,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import 'multer';
 import {
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -31,6 +35,7 @@ import {
   ApiConflictResponse,
   ApiBadRequestResponse,
   ApiBody,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { EUserRole } from 'src/shared/enums/user-role.enum';
@@ -427,6 +432,31 @@ export class BusinessController {
     @Body() dto: UpdateNotaryProfileDto,
   ) {
     return this.businessService.updateNotaryProfile(user.id, dto);
+  }
+
+  @Post('/notary-profile/signature')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles(EBusinessRole.OWNER)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Upload the notary signature image',
+    description:
+      'Upload a signature image file (png/jpg). It is stored and embedded above the closing block on every Minijust letter.',
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiOkResponse({ description: 'Signature uploaded' })
+  async uploadNotarySignature(
+    @CurrentUser() user: User,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.businessService.uploadNotarySignature(user.id, file);
   }
 
   @Get('/workers')
