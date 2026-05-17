@@ -864,9 +864,7 @@ export class BusinessService {
     });
 
     const results = filteredRoles.map(({ key, role }) => {
-      const matching = allMembers.filter((m) =>
-        (m.roles || []).includes(role),
-      );
+      const matching = allMembers.filter((m) => (m.roles || []).includes(role));
       const total = matching.length;
       const data = matching
         .slice(skip, skip + limit)
