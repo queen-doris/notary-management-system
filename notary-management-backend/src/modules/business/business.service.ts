@@ -940,41 +940,16 @@ export class BusinessService {
     workerId: string,
     dto: PutOnLeaveDTO,
   ): Promise<IResponse> => {
-    // Get workers to find the target worker and check for self-leave
-    const workers = (await this.getBusinessWorkers(userId)).data;
-
-    // Search for the worker in all categories
-    let foundWorker: any = null;
-    let workerType: string = '';
-
-    // Check each worker category
-    const categories = [
-      'waiters',
-      'general_managers',
-      'chefs',
-      'accountants',
-      'stock_managers',
-      'bartenders',
-    ];
-
-    for (const category of categories) {
-      const workerList = workers[category];
-      if (Array.isArray(workerList)) {
-        foundWorker = workerList.find(
-          (worker) => worker.id === workerId || worker.user?.id === workerId,
-        );
-      } else if (
-        workerList &&
-        (workerList.id === workerId || workerList.user?.id === workerId)
-      ) {
-        foundWorker = workerList;
-      }
-
-      if (foundWorker) {
-        workerType = category;
-        break;
-      }
-    }
+    // Resolve the worker directly within the owner's business. workerId may
+    // be either the BusinessUser id or the underlying User id.
+    const business = await this.resolvePrimaryBusiness(userId);
+    const foundWorker = await this.businessUserRepository.findOne({
+      where: [
+        { id: workerId, businessId: business.id },
+        { userId: workerId, businessId: business.id },
+      ],
+      relations: ['user'],
+    });
 
     if (!foundWorker) {
       throw new NotFoundException(
@@ -982,21 +957,21 @@ export class BusinessService {
       );
     }
 
-    // Prevent self-leave - check if the worker's user ID matches the current user's ID
-    const workerUserId =
-      foundWorker.userId || foundWorker.user?.id || dto.userId;
-    if (workerUserId === userId) {
+    // Prevent self-leave
+    if (foundWorker.userId === userId) {
       throw new BadRequestException('You cannot give yourself leave');
     }
 
-    // create a leave
+    // create a leave for the resolved worker (identified by the URL param,
+    // not a body field, so the leave and the status change stay in sync)
+    const targetUserId = foundWorker.userId;
     const leave: EmployeeLeave = new EmployeeLeave();
     const user: User | null = await this.userRepository.findOne({
-      where: { id: dto.userId },
+      where: { id: targetUserId },
       relations: ['leaves'],
     });
 
-    if (!user) throw new NotFoundException(`User ${dto.userId} not found.`);
+    if (!user) throw new NotFoundException(`User ${targetUserId} not found.`);
     leave.user = user;
     leave.leaveEndDate = dto.leaveEndDate!;
     leave.leaveStartDate = dto.leaveStartDate!;

@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsDateString, IsString, MaxLength } from 'class-validator';
 
 export class PutOnLeaveDTO {
@@ -27,10 +27,12 @@ export class PutOnLeaveDTO {
   @MaxLength(500)
   reason?: string;
 
-  @ApiProperty({
-    description: 'UUID of the staff user being put on leave',
+  @ApiPropertyOptional({
+    description:
+      'Deprecated/ignored: the worker is identified by the :workerId URL param. Kept optional for backward compatibility.',
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
+  @IsOptional()
   @IsString()
-  userId: string;
+  userId?: string;
 }
