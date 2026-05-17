@@ -1397,6 +1397,7 @@ export class BusinessService {
         notary_letter_recipient:
           business.notary_letter_recipient ||
           "Nyakubahwa Minisitiri w'Ubutabera Ukaba n'Intumwa Nkuru ya Leta",
+        notary_signature_url: business.notary_signature_url || null,
         district: business.district || null,
         sector: business.sector || null,
         phone: business.phone || null,
@@ -1417,6 +1418,7 @@ export class BusinessService {
         | 'notary_title'
         | 'notary_oath_date'
         | 'notary_letter_recipient'
+        | 'notary_signature_url'
       >
     >,
   ): Promise<IResponse> => {
@@ -1429,6 +1431,8 @@ export class BusinessService {
       business.notary_oath_date = dto.notary_oath_date;
     if (dto.notary_letter_recipient !== undefined)
       business.notary_letter_recipient = dto.notary_letter_recipient;
+    if (dto.notary_signature_url !== undefined)
+      business.notary_signature_url = dto.notary_signature_url;
     const saved = await this.businessRepository.save(business);
     return {
       status: 'SUCCESS',
@@ -1438,6 +1442,7 @@ export class BusinessService {
         notary_title: saved.notary_title,
         notary_oath_date: saved.notary_oath_date,
         notary_letter_recipient: saved.notary_letter_recipient,
+        notary_signature_url: saved.notary_signature_url,
       },
       path: '',
       timestamp: new Date().toISOString(),

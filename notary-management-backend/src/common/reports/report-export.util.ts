@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import PDFDocument from 'pdfkit';
 import {
   Document as DocxDocument,
@@ -16,6 +16,7 @@ import {
   WidthType,
   BorderStyle,
   AlignmentType,
+  ImageRun,
 } from 'docx';
 
 export type ReportLanguage = 'rw' | 'en' | 'fr';
@@ -41,6 +42,8 @@ export interface ReportLetter {
   bodyParagraphs: string[];
   /** Closing block lines (signature name/title). */
   closingLines: string[];
+  /** Optional handwritten-signature image, placed above the closing name. */
+  signatureImage?: Buffer | null;
 }
 
 export interface ReportExportPayload {
@@ -67,7 +70,7 @@ export interface ReportExportResult {
 
 const T = {
   summary: { rw: 'Incamake', en: 'Summary', fr: 'Résumé' },
-  total: { rw: 'IGITERANYO', en: 'TOTAL', fr: 'TOTAL' },
+  total: { rw: 'BYOSE HAMWE', en: 'TOTAL', fr: 'TOTAL' },
   noRecords: {
     rw: 'Nta nyandiko zibonetse.',
     en: 'No records.',
@@ -89,10 +92,10 @@ const LABELS: Record<string, Record<ReportLanguage, string>> = {
   sub_service_name: { rw: 'INYANDIKO', en: 'DOCUMENT', fr: 'DOCUMENT' },
   service_name: { rw: 'SERVICE', en: 'SERVICE', fr: 'SERVICE' },
   quantity: { rw: 'UMUBARE', en: 'QTY', fr: 'QTÉ' },
-  unit_price: { rw: 'IGICIRO', en: 'UNIT PRICE', fr: 'PRIX UNIT.' },
-  subtotal: { rw: 'IGITERANYO GICE', en: 'SUBTOTAL', fr: 'SOUS-TOTAL' },
+  unit_price: { rw: 'IKIGUZI', en: 'UNIT PRICE', fr: 'PRIX UNIT.' },
+  subtotal: { rw: 'IGITERANYO', en: 'SUBTOTAL', fr: 'SOUS-TOTAL' },
   vat: { rw: 'TVA', en: 'VAT', fr: 'TVA' },
-  grand_total: { rw: 'IGITERANYO', en: 'TOTAL', fr: 'TOTAL' },
+  grand_total: { rw: 'BYOSE HAMWE', en: 'TOTAL', fr: 'TOTAL' },
   is_refunded: { rw: 'YASUBIJWE', en: 'REFUNDED', fr: 'REMBOURSÉ' },
   amount_refunded: {
     rw: 'YASUBIJWE (FRW)',
@@ -104,7 +107,7 @@ const LABELS: Record<string, Record<ReportLanguage, string>> = {
     en: 'NET AFTER REFUND',
     fr: 'NET APRÈS REMB.',
   },
-  bill_number: { rw: 'NIMERO YA FAKTURE', en: 'BILL No', fr: 'No FACTURE' },
+  bill_number: { rw: 'NIMERO YA FAGITIRE', en: 'BILL No', fr: 'No FACTURE' },
   bill_status: { rw: 'IMITERERE', en: 'STATUS', fr: 'STATUT' },
   status: { rw: 'IMITERERE', en: 'STATUS', fr: 'STATUT' },
   id: { rw: 'ID', en: 'ID', fr: 'ID' },
@@ -118,7 +121,7 @@ const LABELS: Record<string, Record<ReportLanguage, string>> = {
     en: 'SECRETARIAT AMOUNT',
     fr: 'MONTANT SECRÉTARIAT',
   },
-  total: { rw: 'IGITERANYO', en: 'TOTAL', fr: 'TOTAL' },
+  total: { rw: 'BYOSE HAMWE', en: 'TOTAL', fr: 'TOTAL' },
   notary_refund: {
     rw: "IYISUBIZWA RY'UBUNOTERI",
     en: 'NOTARY REFUND',
@@ -136,7 +139,11 @@ const LABELS: Record<string, Record<ReportLanguage, string>> = {
   },
   net_total: { rw: 'AMAFARANGA NYAKURI', en: 'NET TOTAL', fr: 'NET' },
   // summary keys
-  total_bills: { rw: 'UMUBARE WA FAKTURE', en: 'Total bills', fr: 'Factures' },
+  total_bills: {
+    rw: 'UMUBARE WA FAGITIRE',
+    en: 'Total bills',
+    fr: 'Factures',
+  },
   total_notary_revenue: {
     rw: "Amafaranga y'ubunoteri",
     en: 'Notary revenue',
@@ -168,14 +175,14 @@ const LABELS: Record<string, Record<ReportLanguage, string>> = {
     fr: 'Revenu net',
   },
   average_bill_value: {
-    rw: 'Impuzandengo ya faktire',
+    rw: 'Impuzandengo ya fagitire',
     en: 'Average bill value',
     fr: 'Valeur moyenne',
   },
   // notary-records export extras
   client_phone: { rw: 'TELEFONE', en: 'PHONE', fr: 'TÉLÉPHONE' },
   upi: { rw: 'UPI', en: 'UPI', fr: 'UPI' },
-  amount: { rw: 'IGICIRO', en: 'AMOUNT', fr: 'MONTANT' },
+  amount: { rw: 'AGACIRO', en: 'AMOUNT', fr: 'MONTANT' },
   has_documents: {
     rw: 'INYANDIKO ZOMETSE',
     en: 'HAS DOCS',
@@ -293,7 +300,6 @@ export function getReportColumns(
       col('upi'),
       col('quantity'),
       col('unit_price', 'money'),
-      col('amount', 'money'),
       col('vat', 'money'),
       col('grand_total', 'money'),
       col('has_documents', 'bool'),
@@ -367,9 +373,48 @@ export function computeTotalsRow(
   return totals;
 }
 
+function imgType(buf: Buffer): 'png' | 'jpg' | null {
+  if (!buf || buf.length < 4) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50) return 'png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'jpg';
+  return 'png';
+}
+
+const ACCENT_HEX = '1A3C6E';
+
 // ---------------------------------------------------------------------------
 // XLSX
 // ---------------------------------------------------------------------------
+const XLSX_HEADER_STYLE = {
+  font: { bold: true, sz: 11, color: { rgb: '1A3C6E' } },
+  fill: { fgColor: { rgb: 'E6E6E6' } },
+  alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+};
+const XLSX_TOTAL_STYLE = {
+  font: { bold: true, sz: 11 },
+  fill: { fgColor: { rgb: 'DCDCDC' } },
+};
+
+function styleSheet(
+  ws: Record<string, unknown>,
+  nCols: number,
+  nRows: number,
+  hasTotals: boolean,
+): void {
+  for (let c = 0; c < nCols; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    const cell = ws[addr] as { s?: unknown } | undefined;
+    if (cell) cell.s = XLSX_HEADER_STYLE;
+  }
+  if (hasTotals && nRows > 1) {
+    for (let c = 0; c < nCols; c++) {
+      const addr = XLSX.utils.encode_cell({ r: nRows - 1, c });
+      const cell = ws[addr] as { s?: unknown } | undefined;
+      if (cell) cell.s = XLSX_TOTAL_STYLE;
+    }
+  }
+}
+
 function buildXlsx(p: ReportExportPayload): Buffer {
   const wb = XLSX.utils.book_new();
 
@@ -387,23 +432,39 @@ function buildXlsx(p: ReportExportPayload): Buffer {
       [''],
       ...p.letter.closingLines.map((l) => [l]),
     ];
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.aoa_to_sheet(lines),
-      T.letter[p.language],
-    );
+    const ls = XLSX.utils.aoa_to_sheet(lines);
+    ls['!cols'] = [{ wch: 110 }];
+    XLSX.utils.book_append_sheet(wb, ls, T.letter[p.language]);
   }
 
   if (p.summary) {
-    const summaryRows = Object.entries(p.summary).map(([k, v]) => ({
-      [T.summary[p.language]]: labelFor(k, p.language),
-      '': MONEY_KEYS.has(k) ? fmtMoney(v) : String(v ?? ''),
-    }));
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(summaryRows),
-      T.summary[p.language],
-    );
+    const aoa: string[][] = [
+      [T.summary[p.language], ''],
+      ...Object.entries(p.summary).map(([k, v]) => [
+        labelFor(k, p.language),
+        MONEY_KEYS.has(k) ? fmtMoney(v) : String(v ?? ''),
+      ]),
+    ];
+    const ss = XLSX.utils.aoa_to_sheet(aoa);
+    ss['!cols'] = [{ wch: 38 }, { wch: 22 }];
+    const title = ss['A1'] as { s?: unknown } | undefined;
+    if (title)
+      title.s = { font: { bold: true, sz: 13, color: { rgb: '1A3C6E' } } };
+    for (let r = 1; r < aoa.length; r++) {
+      const lc = ss[XLSX.utils.encode_cell({ r, c: 0 })] as
+        | { s?: unknown }
+        | undefined;
+      const vc = ss[XLSX.utils.encode_cell({ r, c: 1 })] as
+        | { s?: unknown }
+        | undefined;
+      if (lc) lc.s = { font: { color: { rgb: '555555' } } };
+      if (vc)
+        vc.s = {
+          font: { bold: true },
+          alignment: { horizontal: 'right' },
+        };
+    }
+    XLSX.utils.book_append_sheet(wb, ss, T.summary[p.language]);
   }
 
   const header = p.columns.map((c) => c.label[p.language]);
@@ -414,16 +475,26 @@ function buildXlsx(p: ReportExportPayload): Buffer {
   if (p.totalsRow) {
     aoa.push(
       p.columns.map((c) =>
-        c.key in p.totalsRow! ? formatCell(c, p.totalsRow![c.key], p.language) : '',
+        c.key in p.totalsRow!
+          ? formatCell(c, p.totalsRow![c.key], p.language)
+          : '',
       ),
     );
   }
   if (aoa.length === 1) aoa.push([T.noRecords[p.language]]);
-  XLSX.utils.book_append_sheet(
-    wb,
-    XLSX.utils.aoa_to_sheet(aoa),
-    T.records[p.language],
-  );
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Column widths from max content length.
+  ws['!cols'] = p.columns.map((c, i) => {
+    let w = c.label[p.language].length;
+    for (const row of aoa.slice(1)) {
+      const len = String(row[i] ?? '').length;
+      if (len > w) w = len;
+    }
+    return { wch: Math.min(Math.max(w + 2, 8), 45) };
+  });
+  ws['!freeze'] = { xSplit: 0, ySplit: 1 };
+  styleSheet(ws, p.columns.length, aoa.length, !!p.totalsRow);
+  XLSX.utils.book_append_sheet(wb, ws, T.records[p.language]);
 
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
 }
@@ -444,58 +515,135 @@ function buildPdf(p: ReportExportPayload): Promise<Buffer> {
   const bottom = doc.page.height - doc.page.margins.bottom;
   const usable = right - left;
 
+  const ACCENT = '#1A3C6E';
+  const lineWidthPt = (txt: string, font: string, size: number): number => {
+    doc.font(font).fontSize(size);
+    return doc.widthOfString(txt || '');
+  };
+
   // ---- Cover letter (first page) ----
   if (p.letter) {
-    doc.font('Helvetica').fontSize(11);
-    for (const l of p.letter.headerLines) doc.text(l, left);
-    doc.moveDown(1);
-    doc.text(p.letter.placeDateLine, left);
-    doc.moveDown(1);
-    for (const l of p.letter.recipientLines) doc.text(l, left);
-    doc.moveDown(1);
-    doc.font('Helvetica-Bold').text(p.letter.subject, left);
-    doc.font('Helvetica').moveDown(1);
-    for (const para of p.letter.bodyParagraphs) {
-      doc.text(para, left, undefined, { align: 'justify', width: usable });
-      doc.moveDown(0.8);
+    const L = p.letter;
+    doc.fillColor('#000');
+    doc.font('Helvetica-Bold').fontSize(11).text(L.headerLines[0] || '', left);
+    doc.font('Helvetica').fontSize(10.5);
+    for (const l of L.headerLines.slice(1)) {
+      doc.text(l, left, undefined, { lineGap: 2 });
     }
-    doc.moveDown(2);
-    for (const l of p.letter.closingLines) doc.text(l, left);
+    doc.moveDown(1.4);
+    doc.text(L.placeDateLine, left);
+    doc.moveDown(1.4);
+    for (const l of L.recipientLines) doc.text(l, left, undefined, {
+      lineGap: 2,
+    });
+    doc.moveDown(1.2);
+    doc.font('Helvetica-Bold').fontSize(11).text(L.subject, left);
+    doc.font('Helvetica').fontSize(10.5).moveDown(1.2);
+    for (const para of L.bodyParagraphs) {
+      doc.text(para, left, undefined, {
+        align: 'justify',
+        width: usable,
+        lineGap: 3,
+      });
+      doc.moveDown(0.9);
+    }
+    doc.moveDown(1.5);
+    const closing = L.closingLines.filter((l) => l !== '');
+    if (closing[0]) doc.text(closing[0], left); // "Bikorewe ... kuwa ..."
+    doc.moveDown(0.4);
+    if (L.signatureImage) {
+      try {
+        doc.image(L.signatureImage, left, doc.y, {
+          fit: [150, 60],
+        });
+        doc.moveDown(0.3);
+        doc.y += 46;
+      } catch {
+        /* ignore unreadable signature */
+      }
+    } else {
+      doc.moveDown(2.4);
+    }
+    for (const l of closing.slice(1)) {
+      doc.font('Helvetica-Bold').fontSize(10.5).text(l, left);
+    }
+    doc.font('Helvetica');
     doc.addPage();
   }
 
   // ---- Title block ----
-  doc.font('Helvetica-Bold').fontSize(15).text(p.title, left, undefined, {
-    width: usable,
-    align: 'center',
-  });
-  doc.font('Helvetica').fontSize(9);
+  doc
+    .fillColor(ACCENT)
+    .font('Helvetica-Bold')
+    .fontSize(16)
+    .text(p.title, left, undefined, { width: usable, align: 'center' });
+  doc.fillColor('#444').font('Helvetica').fontSize(9.5);
   for (const s of p.subtitleLines || []) {
     doc.text(s, left, undefined, { width: usable, align: 'center' });
   }
-  doc.moveDown(0.6);
+  doc.moveDown(0.3);
+  const ruleY = doc.y;
+  doc
+    .lineWidth(1)
+    .strokeColor(ACCENT)
+    .moveTo(left, ruleY)
+    .lineTo(right, ruleY)
+    .stroke();
+  doc.fillColor('#000').moveDown(0.7);
 
   // ---- Summary block ----
-  if (p.summary) {
-    doc.font('Helvetica-Bold').fontSize(10).text(T.summary[p.language], left);
-    doc.font('Helvetica').fontSize(9);
+  if (p.summary && Object.keys(p.summary).length) {
+    doc
+      .fillColor(ACCENT)
+      .font('Helvetica-Bold')
+      .fontSize(12)
+      .text(T.summary[p.language], left);
+    doc.moveDown(0.35);
     for (const [k, v] of Object.entries(p.summary)) {
       const val = MONEY_KEYS.has(k) ? fmtMoney(v) : String(v ?? '');
-      doc.text(`${labelFor(k, p.language)}: ${val}`, left);
+      doc
+        .font('Helvetica')
+        .fontSize(10)
+        .fillColor('#555')
+        .text(`${labelFor(k, p.language)}:  `, left, undefined, {
+          continued: true,
+        });
+      doc.font('Helvetica-Bold').fillColor('#000').text(val);
+      doc.moveDown(0.18);
     }
-    doc.moveDown(0.6);
+    doc.fillColor('#000').moveDown(0.7);
   }
 
   // ---- Table ----
   const cols = p.columns;
   if (!cols.length || !p.rows.length) {
-    doc.fontSize(10).text(T.noRecords[p.language], left);
+    doc.fillColor('#000').fontSize(10).text(T.noRecords[p.language], left);
     doc.end();
     return done;
   }
 
-  // Column widths: weighted by header + sampled content length.
-  const sample = p.rows.slice(0, 40);
+  const padX = 4;
+  const padY = 4;
+  const headerFontSize = 7.5;
+  const bodyFontSize = 7.5;
+
+  // Column widths: proportional to content, then bumped so no header/cell
+  // word is ever broken mid-word (min width >= widest single word).
+  const sample = p.rows.slice(0, 60);
+  const longestWordPt = (c: ReportColumn): number => {
+    const texts = [
+      c.label[p.language],
+      ...sample.map((r) => formatCell(c, r[c.key], p.language)),
+    ];
+    let maxW = 0;
+    for (const t of texts) {
+      for (const word of String(t).split(/\s+/)) {
+        const w = lineWidthPt(word, 'Helvetica-Bold', headerFontSize);
+        if (w > maxW) maxW = w;
+      }
+    }
+    return maxW + padX * 2 + 2;
+  };
   const weights = cols.map((c) => {
     const headerLen = c.label[p.language].length;
     let maxLen = headerLen;
@@ -506,12 +654,37 @@ function buildPdf(p: ReportExportPayload): Promise<Buffer> {
     return Math.min(Math.max(maxLen, 4), 40);
   });
   const weightSum = weights.reduce((a, b) => a + b, 0);
-  const colWidths = weights.map((w) => Math.floor((w / weightSum) * usable));
-
-  const padX = 3;
-  const padY = 3;
-  const headerFontSize = 8;
-  const bodyFontSize = 7.5;
+  const colWidths = weights.map((w) =>
+    Math.floor((w / weightSum) * usable),
+  );
+  // Enforce per-column minimum (widest word) then rebalance.
+  const minW = cols.map((c) => longestWordPt(c));
+  for (let i = 0; i < colWidths.length; i++) {
+    if (colWidths[i] < minW[i]) colWidths[i] = minW[i];
+  }
+  let total = colWidths.reduce((a, b) => a + b, 0);
+  if (total > usable) {
+    // Shrink columns that still have slack above their minimum.
+    let slack = colWidths.reduce(
+      (s, w, i) => s + Math.max(0, w - minW[i]),
+      0,
+    );
+    const over = total - usable;
+    if (slack > 0) {
+      for (let i = 0; i < colWidths.length; i++) {
+        const s = Math.max(0, colWidths[i] - minW[i]);
+        colWidths[i] -= Math.floor((s / slack) * over);
+      }
+    } else {
+      // Everything is at min: scale uniformly (last resort).
+      const f = usable / total;
+      for (let i = 0; i < colWidths.length; i++)
+        colWidths[i] = Math.floor(colWidths[i] * f);
+    }
+  } else if (total < usable) {
+    colWidths[colWidths.length - 1] += usable - total;
+  }
+  total = colWidths.reduce((a, b) => a + b, 0);
 
   const measureRow = (
     cells: string[],
@@ -630,34 +803,83 @@ async function buildDocx(p: ReportExportPayload): Promise<Buffer> {
   const children: (DocxParagraph | DocxTable)[] = [];
 
   if (p.letter) {
-    for (const l of p.letter.headerLines) {
-      children.push(new DocxParagraph({ children: [new TextRun(l)] }));
-    }
-    children.push(new DocxParagraph(''));
-    children.push(new DocxParagraph(p.letter.placeDateLine));
-    children.push(new DocxParagraph(''));
-    for (const l of p.letter.recipientLines) {
-      children.push(new DocxParagraph(l));
-    }
-    children.push(new DocxParagraph(''));
+    const L = p.letter;
+    const sp = (after = 120) => ({ spacing: { after } });
+    L.headerLines.forEach((l, i) =>
+      children.push(
+        new DocxParagraph({
+          ...sp(40),
+          children: [new TextRun({ text: l, bold: i === 0, size: 22 })],
+        }),
+      ),
+    );
+    children.push(new DocxParagraph({ ...sp(220), children: [] }));
     children.push(
       new DocxParagraph({
-        children: [new TextRun({ text: p.letter.subject, bold: true })],
+        ...sp(220),
+        children: [new TextRun({ text: L.placeDateLine, size: 22 })],
       }),
     );
-    children.push(new DocxParagraph(''));
-    for (const para of p.letter.bodyParagraphs) {
+    L.recipientLines.forEach((l) =>
+      children.push(
+        new DocxParagraph({
+          ...sp(60),
+          children: [new TextRun({ text: l, size: 22 })],
+        }),
+      ),
+    );
+    children.push(new DocxParagraph({ ...sp(180), children: [] }));
+    children.push(
+      new DocxParagraph({
+        ...sp(220),
+        children: [new TextRun({ text: L.subject, bold: true, size: 24 })],
+      }),
+    );
+    for (const para of L.bodyParagraphs) {
       children.push(
         new DocxParagraph({
           alignment: AlignmentType.JUSTIFIED,
-          children: [new TextRun(para)],
+          spacing: { after: 180, line: 300 },
+          children: [new TextRun({ text: para, size: 22 })],
         }),
       );
     }
-    children.push(new DocxParagraph(''));
-    children.push(new DocxParagraph(''));
-    for (const l of p.letter.closingLines) {
-      children.push(new DocxParagraph(l));
+    const closing = L.closingLines.filter((l) => l !== '');
+    children.push(new DocxParagraph({ ...sp(120), children: [] }));
+    if (closing[0]) {
+      children.push(
+        new DocxParagraph({
+          ...sp(80),
+          children: [new TextRun({ text: closing[0], size: 22 })],
+        }),
+      );
+    }
+    if (L.signatureImage) {
+      const t = imgType(L.signatureImage);
+      if (t) {
+        children.push(
+          new DocxParagraph({
+            ...sp(40),
+            children: [
+              new ImageRun({
+                type: t,
+                data: L.signatureImage,
+                transformation: { width: 150, height: 60 },
+              } as never),
+            ],
+          }),
+        );
+      }
+    } else {
+      children.push(new DocxParagraph({ ...sp(360), children: [] }));
+    }
+    for (const l of closing.slice(1)) {
+      children.push(
+        new DocxParagraph({
+          ...sp(20),
+          children: [new TextRun({ text: l, bold: true, size: 22 })],
+        }),
+      );
     }
     children.push(
       new DocxParagraph({ children: [], pageBreakBefore: true }),
@@ -668,30 +890,54 @@ async function buildDocx(p: ReportExportPayload): Promise<Buffer> {
     new DocxParagraph({
       heading: HeadingLevel.HEADING_1,
       alignment: AlignmentType.CENTER,
-      children: [new TextRun({ text: p.title, bold: true })],
+      spacing: { after: 60 },
+      children: [
+        new TextRun({ text: p.title, bold: true, color: ACCENT_HEX, size: 32 }),
+      ],
     }),
   );
   for (const s of p.subtitleLines || []) {
     children.push(
       new DocxParagraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: s, size: 18 })],
+        spacing: { after: 40 },
+        children: [new TextRun({ text: s, size: 19, color: '444444' })],
       }),
     );
   }
-  children.push(new DocxParagraph(''));
+  children.push(new DocxParagraph({ spacing: { after: 160 }, children: [] }));
 
-  if (p.summary) {
+  if (p.summary && Object.keys(p.summary).length) {
     children.push(
       new DocxParagraph({
-        children: [new TextRun({ text: T.summary[p.language], bold: true })],
+        spacing: { after: 100 },
+        children: [
+          new TextRun({
+            text: T.summary[p.language],
+            bold: true,
+            size: 26,
+            color: ACCENT_HEX,
+          }),
+        ],
       }),
     );
     for (const [k, v] of Object.entries(p.summary)) {
       const val = MONEY_KEYS.has(k) ? fmtMoney(v) : String(v ?? '');
-      children.push(new DocxParagraph(`${labelFor(k, p.language)}: ${val}`));
+      children.push(
+        new DocxParagraph({
+          spacing: { after: 40 },
+          children: [
+            new TextRun({
+              text: `${labelFor(k, p.language)}:  `,
+              color: '555555',
+              size: 21,
+            }),
+            new TextRun({ text: val, bold: true, size: 21 }),
+          ],
+        }),
+      );
     }
-    children.push(new DocxParagraph(''));
+    children.push(new DocxParagraph({ spacing: { after: 160 }, children: [] }));
   }
 
   if (p.columns.length && p.rows.length) {

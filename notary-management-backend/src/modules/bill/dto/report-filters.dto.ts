@@ -9,7 +9,7 @@ import {
   Min,
   Max,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   BillStatus,
   BillType,
@@ -127,6 +127,10 @@ export class ReportFiltersDto {
     default: true,
   })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => {
+    if (typeof value === 'boolean') return value;
+    const v = String(value).trim().toLowerCase();
+    return !(v === 'false' || v === '0' || v === 'no' || v === '');
+  })
   include_letter?: boolean;
 }

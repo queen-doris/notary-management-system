@@ -38,4 +38,13 @@ export class UpdateNotaryProfileDto {
   @IsOptional()
   @IsString()
   notary_letter_recipient?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "URL of the notary's signature image (png/jpg) shown above the closing block on the Minijust letter",
+    example: 'https://res.cloudinary.com/.../signature.png',
+  })
+  @IsOptional()
+  @IsString()
+  notary_signature_url?: string;
 }

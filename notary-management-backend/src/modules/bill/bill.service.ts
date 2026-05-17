@@ -2666,6 +2666,13 @@ export class BillService {
     businessId: string,
     filters: ReportFiltersDto,
   ): Promise<DailySalesReportDto> {
+    // A "daily" report defaults to today when no range is supplied, so
+    // users get today's sales without entering any date filters.
+    if (!filters.start_date && !filters.end_date) {
+      const today = new Date().toISOString().slice(0, 10);
+      filters = { ...filters, start_date: today, end_date: today };
+    }
+
     const query = this.billRepository
       .createQueryBuilder('bill')
       .where('bill.business_id = :businessId', { businessId })
@@ -2677,10 +2684,18 @@ export class BillService {
       query.andWhere('bill.createdAt >= :startDate', {
         startDate: filters.start_date,
       });
-    if (filters.end_date)
-      query.andWhere('bill.createdAt <= :endDate', {
-        endDate: filters.end_date,
-      });
+    if (filters.end_date) {
+      // Date-only end bound should include the whole day.
+      let endBound = filters.end_date;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(endBound)) {
+        const d = new Date(`${endBound}T00:00:00.000Z`);
+        d.setUTCDate(d.getUTCDate() + 1);
+        endBound = d.toISOString();
+        query.andWhere('bill.createdAt < :endBound', { endBound });
+      } else {
+        query.andWhere('bill.createdAt <= :endBound', { endBound });
+      }
+    }
 
     const bills = await query.orderBy('bill.createdAt', 'DESC').getMany();
 
@@ -3070,22 +3085,67 @@ export class BillService {
 
     const includeLetter =
       kind === 'minijust' && filters.include_letter !== false;
-    const letter = includeLetter
+    let letter: ReportLetter | null = includeLetter
       ? this.buildMinijustLetter(business, filters)
       : null;
+    if (letter && business?.notary_signature_url) {
+      const sig = await this.fetchSignature(business.notary_signature_url);
+      if (sig) letter = { ...letter, signatureImage: sig };
+    }
+
+    // Don't show the other service line in a single-service report.
+    const trimmedSummary = this.trimSummaryForKind(kind, summary);
 
     const result = await renderReport(fmt, {
       title,
       language,
       columns,
       rows,
-      summary: kind === 'minijust' ? null : summary,
+      summary: kind === 'minijust' ? null : trimmedSummary,
       totalsRow,
       letter,
       baseName,
       subtitleLines,
     });
     return result;
+  }
+
+  /** Drop the irrelevant service segment from a financial summary. */
+  private trimSummaryForKind(
+    kind: string,
+    summary: Record<string, unknown> | null,
+  ): Record<string, unknown> | null {
+    if (!summary) return summary;
+    const s = { ...summary };
+    if (kind === 'financial-notary') {
+      delete s.total_secretariat_revenue;
+    } else if (kind === 'financial-secretariat') {
+      delete s.total_notary_revenue;
+      delete s.total_vat_collected;
+    }
+    return s;
+  }
+
+  /** Fetch a remote signature image into a Buffer (best-effort). */
+  private async fetchSignature(url: string): Promise<Buffer | null> {
+    try {
+      const f = (
+        globalThis as unknown as {
+          fetch?: (u: string) => Promise<{
+            ok: boolean;
+            arrayBuffer: () => Promise<ArrayBuffer>;
+          }>;
+        }
+      ).fetch;
+      if (!f) return null;
+      const res = await f(url);
+      if (!res.ok) return null;
+      const ab = await res.arrayBuffer();
+      const buf = Buffer.from(ab);
+      return buf.length > 0 && buf.length < 5 * 1024 * 1024 ? buf : null;
+    } catch {
+      return null;
+    }
   }
 
   async getAllRefunds(

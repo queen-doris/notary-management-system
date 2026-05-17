@@ -151,6 +151,10 @@ export class Business extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   notary_letter_recipient?: string;
 
+  /** URL of the notary's handwritten-signature image (png/jpg). */
+  @Column({ type: 'varchar', nullable: true })
+  notary_signature_url?: string;
+
   @OneToMany(() => BusinessUser, (businessUser) => businessUser.business, {
     cascade: false,
     eager: false,
