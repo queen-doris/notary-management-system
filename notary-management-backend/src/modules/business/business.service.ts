@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/require-await */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+
 import {
   BadRequestException,
   ConflictException,
@@ -19,7 +17,7 @@ import { EWorkingDays } from 'src/shared/enums/working-days.enum';
 import { BusinessHoursUtil } from 'src/common/utils/business-hours.util';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Business } from 'src/shared/entities/business.entity';
-import { Repository } from 'typeorm';
+import { Repository, MoreThanOrEqual, In } from 'typeorm';
 import { BusinessPaginationDto } from './dto/business-pagination.dto';
 import { BusinessUserService } from '../business-user/business-user.service';
 import { BusinessUser } from 'src/shared/entities/business-user.entity';
@@ -27,6 +25,7 @@ import { EBusinessRole } from 'src/shared/enums/business-role.enum';
 import { IResponse } from 'src/shared/interfaces/response.interface';
 import { User } from 'src/shared/entities/user.entity';
 import { EUserStatus } from 'src/shared/enums/user-status.enum';
+import { EUserRole } from 'src/shared/enums/user-role.enum';
 import { EEmploymentStatus } from 'src/shared/enums/employee-status.enum';
 import { PutOnLeaveDTO } from './dto/put-on-leave.dto';
 import { EmployeeLeave } from 'src/shared/entities/employee-leave.entity';
@@ -728,6 +727,219 @@ export class BusinessService {
     }
   };
 
+  /**
+   * System-wide analytics for the superadmin dashboard: businesses, users,
+   * memberships, leaves and a few aggregates. Read-only.
+   */
+  getSystemAnalytics = async (): Promise<IResponse> => {
+    try {
+      const now = new Date();
+      const last7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const last30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      const [
+        totalBusinesses,
+        activeBusinesses,
+        inactiveBusinesses,
+        verifiedBusinesses,
+        unverifiedBusinesses,
+        withSecretariat,
+        businessesLast7Days,
+        businessesLast30Days,
+        totalUsers,
+        usersActive,
+        usersInactive,
+        usersSuspended,
+        usersSuperadmin,
+        usersStaff,
+        usersCustomer,
+        usersVerified,
+        usersLast7Days,
+        usersLast30Days,
+      ] = await Promise.all([
+        this.businessRepository.count(),
+        this.businessRepository.count({ where: { isActive: true } }),
+        this.businessRepository.count({ where: { isActive: false } }),
+        this.businessRepository.count({ where: { isVerified: true } }),
+        this.businessRepository.count({ where: { isVerified: false } }),
+        this.businessRepository.count({ where: { has_secretariat: true } }),
+        this.businessRepository.count({
+          where: { createdAt: MoreThanOrEqual(last7) },
+        }),
+        this.businessRepository.count({
+          where: { createdAt: MoreThanOrEqual(last30) },
+        }),
+        this.userRepository.count(),
+        this.userRepository.count({ where: { status: EUserStatus.ACTIVE } }),
+        this.userRepository.count({ where: { status: EUserStatus.INACTIVE } }),
+        this.userRepository.count({ where: { status: EUserStatus.SUSPENDED } }),
+        this.userRepository.count({ where: { role: EUserRole.SUPERADMIN } }),
+        this.userRepository.count({ where: { role: EUserRole.STAFF } }),
+        this.userRepository.count({ where: { role: EUserRole.CUSTOMER } }),
+        this.userRepository.count({ where: { isVerified: true } }),
+        this.userRepository.count({
+          where: { createdAt: MoreThanOrEqual(last7) },
+        }),
+        this.userRepository.count({
+          where: { createdAt: MoreThanOrEqual(last30) },
+        }),
+      ]);
+
+      // Memberships: aggregate in memory (roles is an enum array column;
+      // raw `= ANY()` SQL is fragile, and these volumes are admin-scale).
+      const memberships = await this.businessUserRepository.find({
+        select: {
+          id: true,
+          userId: true,
+          businessId: true,
+          roles: true,
+          employmentStatus: true,
+          isClockedIn: true,
+        },
+      });
+
+      const byBusinessRole: Record<string, number> = {
+        OWNER: 0,
+        ACCOUNTANT: 0,
+        SECRETARIAT: 0,
+        RECEPTIONIST: 0,
+      };
+      const byEmploymentStatus: Record<string, number> = {
+        ACTIVE: 0,
+        ON_LEAVE: 0,
+        SUSPENDED: 0,
+        TERMINATED: 0,
+      };
+      const membersPerBusiness = new Map<string, number>();
+      const usersWithMembership = new Set<string>();
+      let clockedIn = 0;
+
+      for (const m of memberships) {
+        for (const r of m.roles || []) {
+          if (r in byBusinessRole) byBusinessRole[r] += 1;
+        }
+        if (m.employmentStatus in byEmploymentStatus) {
+          byEmploymentStatus[m.employmentStatus] += 1;
+        }
+        if (m.isClockedIn) clockedIn += 1;
+        usersWithMembership.add(m.userId);
+        membersPerBusiness.set(
+          m.businessId,
+          (membersPerBusiness.get(m.businessId) || 0) + 1,
+        );
+      }
+
+      const topBusinessIds = [...membersPerBusiness.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+      const [topBusinessesRaw, recentBusinesses, ongoingLeaves, totalLeaves] =
+        await Promise.all([
+          topBusinessIds.length
+            ? this.businessRepository.find({
+                where: { id: In(topBusinessIds.map(([id]) => id)) },
+                select: { id: true, businessName: true },
+              })
+            : Promise.resolve([]),
+          this.businessRepository.find({
+            order: { createdAt: 'DESC' },
+            take: 5,
+            select: {
+              id: true,
+              businessName: true,
+              isActive: true,
+              isVerified: true,
+              createdAt: true,
+            },
+          }),
+          this.leaveRepository.count({
+            where: {
+              leaveEndDate: MoreThanOrEqual(now.toISOString().slice(0, 10)),
+            },
+          }),
+          this.leaveRepository.count(),
+        ]);
+
+      const topBusinessNameById = new Map(
+        topBusinessesRaw.map((b) => [b.id, b.businessName]),
+      );
+      const topBusinessesByStaff = topBusinessIds.map(([id, count]) => ({
+        businessId: id,
+        businessName: topBusinessNameById.get(id) ?? null,
+        memberCount: count,
+      }));
+
+      return {
+        status: 'SUCCESS',
+        timestamp: new Date().toISOString(),
+        path: '/business/analytics',
+        data: {
+          businesses: {
+            total: totalBusinesses,
+            active: activeBusinesses,
+            inactive: inactiveBusinesses,
+            verified: verifiedBusinesses,
+            unverified: unverifiedBusinesses,
+            withSecretariat,
+            withoutSecretariat: totalBusinesses - withSecretariat,
+            registeredLast7Days: businessesLast7Days,
+            registeredLast30Days: businessesLast30Days,
+          },
+          users: {
+            total: totalUsers,
+            verified: usersVerified,
+            unverified: totalUsers - usersVerified,
+            byStatus: {
+              ACTIVE: usersActive,
+              INACTIVE: usersInactive,
+              SUSPENDED: usersSuspended,
+            },
+            bySystemRole: {
+              SUPERADMIN: usersSuperadmin,
+              STAFF: usersStaff,
+              CUSTOMER: usersCustomer,
+            },
+            withBusinessMembership: usersWithMembership.size,
+            withoutBusinessMembership: Math.max(
+              totalUsers - usersWithMembership.size,
+              0,
+            ),
+            registeredLast7Days: usersLast7Days,
+            registeredLast30Days: usersLast30Days,
+          },
+          memberships: {
+            total: memberships.length,
+            byBusinessRole,
+            byEmploymentStatus,
+            clockedIn,
+          },
+          leaves: {
+            total: totalLeaves,
+            ongoing: ongoingLeaves,
+          },
+          aggregates: {
+            avgMembersPerBusiness:
+              totalBusinesses > 0
+                ? Number((memberships.length / totalBusinesses).toFixed(2))
+                : 0,
+            topBusinessesByStaff,
+          },
+          recentBusinesses,
+        },
+        message: 'System analytics retrieved successfully',
+      };
+    } catch (error) {
+      return {
+        status: 'ERROR',
+        timestamp: new Date().toISOString(),
+        path: '/business/analytics',
+        data: null,
+        message:
+          (error as Error)?.message || 'Failed to retrieve system analytics',
+      };
+    }
+  };
+
   // Get all businesses for admin with full access to status fields
   getAdminBusinesses = async (
     paginationDto: BusinessPaginationDto,
@@ -855,7 +1067,8 @@ export class BusinessService {
     const wanted = role?.trim().toUpperCase();
     const selected = wanted
       ? roleBuckets.filter(
-          (b) => (b.role as string) === wanted || b.key === wanted.toLowerCase(),
+          (b) =>
+            (b.role as string) === wanted || b.key === wanted.toLowerCase(),
         )
       : roleBuckets;
 
@@ -878,9 +1091,7 @@ export class BusinessService {
 
     const result = selected.reduce<Record<string, unknown>>(
       (acc, { key, role: r }) => {
-        const matching = allMembers.filter((m) =>
-          (m.roles || []).includes(r),
-        );
+        const matching = allMembers.filter((m) => (m.roles || []).includes(r));
         const total = matching.length;
         const data = matching
           .slice(skip, skip + limit)
@@ -900,6 +1111,27 @@ export class BusinessService {
       },
       {},
     );
+
+    // Always expose every member of the business in an `all` bucket
+    // (deduped: one BusinessUser row per user per business) so callers can
+    // retrieve all users regardless of role. Skipped when filtering to a
+    // single role.
+    if (!wanted) {
+      const total = allMembers.length;
+      result.all = {
+        data: allMembers
+          .slice(skip, skip + limit)
+          .map((m) => this.sanitizeMember(m)),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: skip + limit < total,
+          hasPrev: page > 1,
+        },
+      };
+    }
 
     return {
       status: 'SUCCESS',

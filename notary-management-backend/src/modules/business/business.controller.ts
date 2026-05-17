@@ -375,6 +375,27 @@ export class BusinessController {
     return this.businessService.getBusinessStatistics();
   }
 
+  @Get('/analytics')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles(EUserRole.SUPERADMIN)
+  @ApiOperation({
+    summary: 'Get system analytics (Superadmin only)',
+    description:
+      'System-wide analytics for the superadmin dashboard: business ' +
+      'counts (active/verified/secretariat/recent), user counts (by ' +
+      'status, system role, verification, membership, recent), membership ' +
+      'breakdown (by business role and employment status, clocked-in), ' +
+      'leave totals, and aggregates (avg members/business, top businesses ' +
+      'by staff, recent businesses).',
+  })
+  @ApiOkResponse({ description: 'System analytics retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Not a superadmin' })
+  async getSystemAnalytics() {
+    return this.businessService.getSystemAnalytics();
+  }
+
   @Get('/workers')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @ApiBearerAuth('access-token')
