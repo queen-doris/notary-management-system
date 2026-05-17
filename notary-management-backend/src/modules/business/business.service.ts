@@ -48,13 +48,13 @@ type UpdateBusinessDto = Partial<Business>;
 @Injectable()
 export class BusinessService {
   @InjectRepository(Business)
-  businessRepository: Repository<Business>;
+  businessRepository!: Repository<Business>;
   @InjectRepository(User)
-  userRepository: Repository<User>;
+  userRepository!: Repository<User>;
   @InjectRepository(EmployeeLeave)
-  leaveRepository: Repository<EmployeeLeave>;
+  leaveRepository!: Repository<EmployeeLeave>;
   @InjectRepository(BusinessUser)
-  businessUserRepository: Repository<BusinessUser>;
+  businessUserRepository!: Repository<BusinessUser>;
 
   constructor(
     private readonly businessUserService: BusinessUserService,
@@ -723,7 +723,9 @@ export class BusinessService {
         timestamp: new Date().toISOString(),
         path: '/business/statistics',
         data: null,
-        message: error.message || 'Failed to retrieve business statistics',
+        message:
+          (error as Error)?.message ||
+          'Failed to retrieve business statistics',
       };
     }
   };
@@ -811,7 +813,8 @@ export class BusinessService {
         timestamp: new Date().toISOString(),
         path: '/business/admin/businesses',
         data: null,
-        message: error.message || 'Failed to retrieve admin businesses',
+        message:
+          (error as Error)?.message || 'Failed to retrieve admin businesses',
       };
     }
   };
@@ -850,7 +853,9 @@ export class BusinessService {
 
     const filteredRoles = role
       ? roleMap.filter(
-          (r) => r.role === role || r.key === role.replace(' ', '_'),
+          (r) =>
+            (r.role as string) === role ||
+            r.key === role.replace(' ', '_'),
         )
       : roleMap;
 
