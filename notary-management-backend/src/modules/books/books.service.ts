@@ -21,6 +21,13 @@ import { EBusinessRole } from '../../shared/enums/business-role.enum';
 import { RecordStatus } from '../../shared/enums/record-status.enum';
 import { DEFAULT_BOOKS } from '../notary-service/default-notary-services.data';
 import { Generators } from '../../common/utils/generator.utils';
+import {
+  renderReport,
+  getReportColumns,
+  computeTotalsRow,
+  ReportLanguage,
+  ReportExportResult,
+} from '../../common/reports/report-export.util';
 import * as XLSX from 'xlsx';
 
 const UUID_RE =
@@ -474,6 +481,92 @@ export class BooksService {
       limit,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  /**
+   * Export notary records (detailed, not a summary) as xlsx/pdf/docx with
+   * Kinyarwanda headers by default and a real bordered table.
+   */
+  async exportNotaryRecords(
+    businessId: string,
+    filters: {
+      start_date?: string;
+      end_date?: string;
+      book_id?: string;
+      client_id?: string;
+      client_name?: string;
+      format?: string;
+      language?: ReportLanguage;
+    },
+  ): Promise<ReportExportResult> {
+    const query = this.notaryRecordRepository
+      .createQueryBuilder('record')
+      .where('record.business_id = :businessId', { businessId })
+      .andWhere('record.status = :status', { status: RecordStatus.ACTIVE });
+
+    if (filters.start_date)
+      query.andWhere('record.served_date >= :s', { s: filters.start_date });
+    if (filters.end_date)
+      query.andWhere('record.served_date <= :e', { e: filters.end_date });
+    if (filters.book_id)
+      query.andWhere('record.book_id = :b', { b: filters.book_id });
+    if (filters.client_id)
+      query.andWhere('record.client_id = :c', { c: filters.client_id });
+    if (filters.client_name)
+      query.andWhere('record.client_full_name ILIKE :n', {
+        n: `%${filters.client_name}%`,
+      });
+
+    const records = await query
+      .orderBy('record.served_date', 'ASC')
+      .addOrderBy('record.record_number', 'ASC')
+      .getMany();
+
+    const business = await this.businessRepository.findOne({
+      where: { id: businessId },
+    });
+
+    const language: ReportLanguage = filters.language || 'rw';
+    const columns = getReportColumns('notary-records', language);
+    const rows = records.map((r) => ({
+      date: r.served_date,
+      book_type: r.book_type,
+      volume: r.volume || '-',
+      number: r.display_number || r.record_number,
+      client_full_name: r.client_full_name,
+      client_id_number: r.client_id_number,
+      client_phone: r.client_phone,
+      sub_service_name: r.sub_service,
+      service_name: r.service_category,
+      upi: r.upi,
+      quantity: r.quantity,
+      unit_price: r.unit_price,
+      amount: r.amount,
+      vat: r.vat_amount,
+      grand_total:
+        r.grand_total ?? (r.amount || 0) + (r.vat_amount || 0),
+      has_documents: r.has_documents,
+      bill_status: r.status,
+    }));
+
+    const subtitleLines: string[] = [];
+    if (business?.businessName) subtitleLines.push(business.businessName);
+    if (filters.start_date || filters.end_date)
+      subtitleLines.push(
+        `${filters.start_date || '...'} → ${filters.end_date || '...'}`,
+      );
+
+    return renderReport(filters.format || 'xlsx', {
+      title: language === 'rw' ? "Raporo y'inyandiko" : 'Notary Records',
+      language,
+      columns,
+      rows,
+      summary: null,
+      totalsRow: computeTotalsRow(columns, rows, language),
+      letter: null,
+      baseName: 'notary-records',
+      subtitleLines,
+    });
   }
 
   async getRecordById(

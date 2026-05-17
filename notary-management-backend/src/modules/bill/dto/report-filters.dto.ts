@@ -110,4 +110,23 @@ export class ReportFiltersDto {
   @IsOptional()
   @IsString()
   format?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Report language for headers/labels. Default is Kinyarwanda (rw).',
+    enum: ['rw', 'en', 'fr'],
+    default: 'rw',
+  })
+  @IsOptional()
+  @IsEnum(['rw', 'en', 'fr'])
+  language?: 'rw' | 'en' | 'fr';
+
+  @ApiPropertyOptional({
+    description:
+      'Minijust export only: include the formatted cover letter. Default true. Set false to get just the records table.',
+    default: true,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  include_letter?: boolean;
 }

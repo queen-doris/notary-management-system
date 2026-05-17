@@ -45,6 +45,7 @@ import { UpdateBusinessHoursDto } from './dto/update-business-hours.dto';
 import { UpdateBusinessLocationDto } from './dto/update-business-location.dto';
 import { PutOnLeaveDTO } from './dto/put-on-leave.dto';
 import { BusinessQueryDto } from './dto/business-query.dto';
+import { UpdateNotaryProfileDto } from './dto/update-notary-profile.dto';
 import { Business } from 'src/shared/entities/business.entity';
 import { EWorkingDays } from 'src/shared/enums/working-days.enum';
 
@@ -394,6 +395,38 @@ export class BusinessController {
   @ApiResponse({ status: 403, description: 'Forbidden - Not a superadmin' })
   async getSystemAnalytics() {
     return this.businessService.getSystemAnalytics();
+  }
+
+  @Get('/notary-profile')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Get Minijust cover-letter profile',
+    description:
+      'Returns the notary identity used on the Minijust report letter (name, title, oath date, recipient) plus the district/sector/phone/email reused from the business.',
+  })
+  @ApiOkResponse({ description: 'Notary profile retrieved' })
+  async getNotaryProfile(@CurrentUser() user: User) {
+    return this.businessService.getNotaryProfile(user.id);
+  }
+
+  @Put('/notary-profile')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles(EBusinessRole.OWNER)
+  @ApiOperation({
+    summary: 'Update Minijust cover-letter profile',
+    description:
+      'Set the notary name, title, oath date ("Itariki yo Kurahira") and letter recipient once; every Minijust export reuses them.',
+  })
+  @ApiBody({ type: UpdateNotaryProfileDto })
+  @ApiOkResponse({ description: 'Notary profile updated' })
+  async updateNotaryProfile(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateNotaryProfileDto,
+  ) {
+    return this.businessService.updateNotaryProfile(user.id, dto);
   }
 
   @Get('/workers')

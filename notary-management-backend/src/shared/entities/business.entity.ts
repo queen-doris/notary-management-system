@@ -133,6 +133,24 @@ export class Business extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   emergencyContactPhone?: string;
 
+  // ---- Minijust cover-letter profile ----
+  // Filled once by the notary; reused on every Minijust export so they
+  // only maintain a few fields. District/sector/phone/email above are
+  // reused for the letterhead.
+  @Column({ type: 'varchar', nullable: true })
+  notary_full_name?: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  notary_title?: string;
+
+  /** Oath / swearing-in date — "Itariki yo Kurahira". */
+  @Column({ type: 'date', nullable: true })
+  notary_oath_date?: string;
+
+  /** Recipient block, defaults to the Minister of Justice. */
+  @Column({ type: 'varchar', nullable: true })
+  notary_letter_recipient?: string;
+
   @OneToMany(() => BusinessUser, (businessUser) => businessUser.business, {
     cascade: false,
     eager: false,

@@ -30,19 +30,13 @@ import { SecretariatService } from '../../shared/entities/secretariat-service.en
 import { NotaryRecord } from '../../shared/entities/notary-record.entity';
 import { SecretariatRecord } from '../../shared/entities/secretariat-record.entity';
 import { Document } from '../../shared/entities/document.entity';
-import * as XLSX from 'xlsx';
-import PDFDocument from 'pdfkit';
 import {
-  Document as DocxDocument,
-  Packer,
-  Paragraph as DocxParagraph,
-  TextRun,
-  Table as DocxTable,
-  TableRow as DocxTableRow,
-  TableCell as DocxTableCell,
-  HeadingLevel,
-  WidthType,
-} from 'docx';
+  renderReport,
+  getReportColumns,
+  computeTotalsRow,
+  ReportLanguage,
+  ReportLetter,
+} from '../../common/reports/report-export.util';
 import { Book } from '../../shared/entities/book.entity';
 import { Payment } from '../../shared/entities/payment.entity';
 import {
@@ -2964,9 +2958,83 @@ export class BillService {
     );
   }
 
+  /** Format a date as dd/mm/yyyy for the Kinyarwanda letter. */
+  private rwDate(d?: string | Date | null): string {
+    if (!d) return '';
+    const dt = d instanceof Date ? d : new Date(d);
+    if (isNaN(dt.getTime())) return String(d);
+    const day = String(dt.getDate()).padStart(2, '0');
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    return `${day}/${m}/${dt.getFullYear()}`;
+  }
+
+  /** Derive an "igihembwe cya N <year>" label from a date range. */
+  private quarterLabel(filters: ReportFiltersDto): string {
+    if (!filters.start_date) return '';
+    const s = new Date(filters.start_date);
+    if (isNaN(s.getTime())) return '';
+    const q = Math.floor(s.getMonth() / 3) + 1;
+    const names = ['mbere', 'kabiri', 'gatatu', 'kane'];
+    return `igihembwe cya ${names[q - 1] || q} ${s.getFullYear()}`;
+  }
+
+  /** Build the Minijust cover letter from the business notary profile. */
+  private buildMinijustLetter(
+    business: Business | null,
+    filters: ReportFiltersDto,
+  ): ReportLetter {
+    const name =
+      business?.notary_full_name || business?.businessName || 'Noteri';
+    const title = business?.notary_title || 'Noteri Wikorera';
+    const district = business?.district || '';
+    const sector = business?.sector || '';
+    const phone = business?.phone || '';
+    const email = business?.email || '';
+    const place = sector || district || '';
+    const today = this.rwDate(new Date());
+    const periodTxt =
+      this.quarterLabel(filters) ||
+      (filters.start_date && filters.end_date
+        ? `kuva ${this.rwDate(filters.start_date)} kugeza ${this.rwDate(
+            filters.end_date,
+          )}`
+        : 'iki gihe');
+
+    const headerLines = [
+      name,
+      `${title}${district ? ` Mu karere ka ${district}` : ''}`,
+    ];
+    if (sector) headerLines.push(`Umurenge wa ${sector}`);
+    if (phone) headerLines.push(`Tel ${phone}`);
+    if (email) headerLines.push(`Email: ${email}`);
+    if (business?.notary_oath_date) {
+      headerLines.push(
+        `Itariki yo Kurahira: ${this.rwDate(business.notary_oath_date)}`,
+      );
+    }
+
+    return {
+      headerLines,
+      placeDateLine: `${place}, kuwa ${today}`,
+      recipientLines: [
+        business?.notary_letter_recipient ||
+          "Nyakubahwa Minisitiri w'Ubutabera Ukaba n'Intumwa Nkuru ya Leta",
+      ],
+      subject: `Impamvu: Kubagezaho raporo y'imirimo mu ${periodTxt}`,
+      bodyParagraphs: [
+        'Nyakubahwa Minisitiri,',
+        "Nshingiye ku ngingo ya 13 y'iteka rya Minisitiri No 013/MOJ/AG/2017 ryo kuwa 24/02/2017 rigena uburyo abikorera binjira mu mwuga w'Ubunoteri, n'uko bakora, uburyo umunoteri wikorera agenzurwa n'uko abika inyandiko;",
+        `Nejejwe no kubandikira ngirango mbagezeho ku mugereka w'iyi barwa raporo y'imirimo nakoze mu ${periodTxt}.`,
+        'Ndabashyimiye.',
+      ],
+      closingLines: [`Bikorewe ${place} kuwa ${today}`, '', name, title],
+    };
+  }
+
   /**
-   * Export a report as Excel, PDF or Word.
-   * format: 'xlsx' | 'pdf' | 'docx'.
+   * Export a report as Excel, PDF or Word with detailed columns,
+   * Kinyarwanda headers by default, real bordered tables, totals and
+   * (for Minijust) an optional formatted cover letter.
    */
   async exportReport(
     businessId: string,
@@ -2980,123 +3048,44 @@ export class BillService {
       filters,
     );
     const fmt = (format || 'xlsx').toLowerCase();
+    const language: ReportLanguage = filters.language || 'rw';
+    const columns = getReportColumns(kind, language);
 
-    if (fmt === 'xlsx') {
-      const wb = XLSX.utils.book_new();
-      if (summary) {
-        XLSX.utils.book_append_sheet(
-          wb,
-          XLSX.utils.json_to_sheet([summary]),
-          'Summary',
-        );
-      }
-      XLSX.utils.book_append_sheet(
-        wb,
-        XLSX.utils.json_to_sheet(rows.length ? rows : [{}]),
-        'Records',
+    const business = await this.businessRepository.findOne({
+      where: { id: businessId },
+    });
+
+    const subtitleLines: string[] = [];
+    if (business?.businessName) subtitleLines.push(business.businessName);
+    if (filters.start_date || filters.end_date) {
+      subtitleLines.push(
+        `${filters.start_date || '...'} → ${filters.end_date || '...'}`,
       );
-      return {
-        buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer,
-        filename: `${baseName}.xlsx`,
-        contentType:
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      };
     }
 
-    const headers = rows.length ? Object.keys(rows[0]) : [];
+    const totalsRow =
+      kind === 'minijust'
+        ? null
+        : computeTotalsRow(columns, rows, language);
 
-    if (fmt === 'pdf') {
-      const doc = new PDFDocument({
-        margin: 24,
-        size: 'A4',
-        layout: 'landscape',
-      });
-      const chunks: Buffer[] = [];
-      doc.on('data', (c: Buffer) => chunks.push(c));
-      const done = new Promise<Buffer>((resolve) =>
-        doc.on('end', () => resolve(Buffer.concat(chunks))),
-      );
-      doc.fontSize(16).text(title, { underline: true });
-      doc.moveDown(0.5);
-      if (summary) {
-        doc.fontSize(10);
-        for (const [k, v] of Object.entries(summary)) {
-          doc.text(`${k}: ${String(v)}`);
-        }
-        doc.moveDown(0.5);
-      }
-      doc.fontSize(8);
-      if (headers.length) {
-        doc.text(headers.join(' | '));
-        doc.moveDown(0.2);
-        for (const r of rows) {
-          doc.text(headers.map((h) => String(r[h] ?? '')).join(' | '));
-        }
-      } else {
-        doc.text('No records.');
-      }
-      doc.end();
-      return {
-        buffer: await done,
-        filename: `${baseName}.pdf`,
-        contentType: 'application/pdf',
-      };
-    }
+    const includeLetter =
+      kind === 'minijust' && filters.include_letter !== false;
+    const letter = includeLetter
+      ? this.buildMinijustLetter(business, filters)
+      : null;
 
-    if (fmt === 'docx') {
-      const children: (DocxParagraph | DocxTable)[] = [
-        new DocxParagraph({
-          text: title,
-          heading: HeadingLevel.HEADING_1,
-        }),
-      ];
-      if (summary) {
-        for (const [k, v] of Object.entries(summary)) {
-          children.push(new DocxParagraph(`${k}: ${String(v)}`));
-        }
-      }
-      if (headers.length) {
-        const headerRow = new DocxTableRow({
-          children: headers.map(
-            (h) =>
-              new DocxTableCell({
-                children: [
-                  new DocxParagraph({
-                    children: [new TextRun({ text: h, bold: true })],
-                  }),
-                ],
-              }),
-          ),
-        });
-        const dataRows = rows.map(
-          (r) =>
-            new DocxTableRow({
-              children: headers.map(
-                (h) =>
-                  new DocxTableCell({
-                    children: [new DocxParagraph(String(r[h] ?? ''))],
-                  }),
-              ),
-            }),
-        );
-        children.push(
-          new DocxTable({
-            rows: [headerRow, ...dataRows],
-            width: { size: 100, type: WidthType.PERCENTAGE },
-          }),
-        );
-      }
-      const document = new DocxDocument({ sections: [{ children }] });
-      const buffer = await Packer.toBuffer(document);
-      return {
-        buffer: Buffer.from(buffer),
-        filename: `${baseName}.docx`,
-        contentType:
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      };
-    }
-
-    throw new BadRequestException('Unknown format. Use: xlsx | pdf | docx');
+    const result = await renderReport(fmt, {
+      title,
+      language,
+      columns,
+      rows,
+      summary: kind === 'minijust' ? null : summary,
+      totalsRow,
+      letter,
+      baseName,
+      subtitleLines,
+    });
+    return result;
   }
 
   async getAllRefunds(

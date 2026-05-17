@@ -1384,6 +1384,66 @@ export class BusinessService {
     };
   };
 
+  /** Read the Minijust cover-letter profile for the owner's business. */
+  getNotaryProfile = async (userId: string): Promise<IResponse> => {
+    const business = await this.resolvePrimaryBusiness(userId);
+    return {
+      status: 'SUCCESS',
+      data: {
+        notary_full_name:
+          business.notary_full_name || business.businessName || null,
+        notary_title: business.notary_title || 'Noteri Wikorera',
+        notary_oath_date: business.notary_oath_date || null,
+        notary_letter_recipient:
+          business.notary_letter_recipient ||
+          "Nyakubahwa Minisitiri w'Ubutabera Ukaba n'Intumwa Nkuru ya Leta",
+        district: business.district || null,
+        sector: business.sector || null,
+        phone: business.phone || null,
+        email: business.email || null,
+      },
+      path: '',
+      timestamp: new Date().toISOString(),
+    };
+  };
+
+  /** Update the Minijust cover-letter profile. */
+  updateNotaryProfile = async (
+    userId: string,
+    dto: Partial<
+      Pick<
+        Business,
+        | 'notary_full_name'
+        | 'notary_title'
+        | 'notary_oath_date'
+        | 'notary_letter_recipient'
+      >
+    >,
+  ): Promise<IResponse> => {
+    const business = await this.resolvePrimaryBusiness(userId);
+    if (dto.notary_full_name !== undefined)
+      business.notary_full_name = dto.notary_full_name;
+    if (dto.notary_title !== undefined)
+      business.notary_title = dto.notary_title;
+    if (dto.notary_oath_date !== undefined)
+      business.notary_oath_date = dto.notary_oath_date;
+    if (dto.notary_letter_recipient !== undefined)
+      business.notary_letter_recipient = dto.notary_letter_recipient;
+    const saved = await this.businessRepository.save(business);
+    return {
+      status: 'SUCCESS',
+      message: 'Notary profile updated',
+      data: {
+        notary_full_name: saved.notary_full_name,
+        notary_title: saved.notary_title,
+        notary_oath_date: saved.notary_oath_date,
+        notary_letter_recipient: saved.notary_letter_recipient,
+      },
+      path: '',
+      timestamp: new Date().toISOString(),
+    };
+  };
+
   /**
    * Get subscription summary (admin only)
    * Returns total revenue, active subscriptions count, and recent transactions

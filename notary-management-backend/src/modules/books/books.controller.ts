@@ -11,7 +11,9 @@ import {
   Req,
   UseInterceptors,
   UploadedFile,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import 'multer';
 import {
@@ -222,6 +224,53 @@ export class BooksController {
   @ApiOkResponse({ description: 'Statistics retrieved' })
   async getBookStatistics(@Req() req: AuthenticatedRequest) {
     return this.booksService.getBookStatistics(req.user.businessId);
+  }
+
+  @Get('records/export')
+  @Roles(EBusinessRole.OWNER, EBusinessRole.SECRETARIAT)
+  @ApiOperation({
+    summary: 'Download notary records as Excel, PDF or Word',
+    description:
+      'Streams a detailed notary-records file (every column, not a summary) with a real bordered table. Headers default to Kinyarwanda; pass language=en|fr to change. Filters: start_date, end_date, book_id, client_id, client_name.',
+  })
+  @ApiQuery({
+    name: 'format',
+    required: false,
+    enum: ['xlsx', 'pdf', 'docx'],
+  })
+  @ApiQuery({ name: 'language', required: false, enum: ['rw', 'en', 'fr'] })
+  @ApiQuery({ name: 'start_date', required: false })
+  @ApiQuery({ name: 'end_date', required: false })
+  @ApiQuery({ name: 'book_id', required: false })
+  @ApiQuery({ name: 'client_id', required: false })
+  @ApiQuery({ name: 'client_name', required: false })
+  @ApiOkResponse({ description: 'Notary records file stream' })
+  async exportNotaryRecords(
+    @Req() req: AuthenticatedRequest,
+    @Query('format') format: string,
+    @Query('language') language: 'rw' | 'en' | 'fr',
+    @Query('start_date') start_date: string,
+    @Query('end_date') end_date: string,
+    @Query('book_id') book_id: string,
+    @Query('client_id') client_id: string,
+    @Query('client_name') client_name: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename, contentType } =
+      await this.booksService.exportNotaryRecords(req.user.businessId, {
+        format,
+        language,
+        start_date,
+        end_date,
+        book_id,
+        client_id,
+        client_name,
+      });
+    res.set({
+      'Content-Type': contentType,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    res.send(buffer);
   }
 
   @Get(':bookRef')
