@@ -843,18 +843,29 @@ export class BusinessService {
     const business = await this.resolvePrimaryBusiness(userId);
     const skip = (page - 1) * limit;
 
-    const roleMap: Array<{ key: string; role: EBusinessRole }> = [
+    // One bucket per business role. Keys are stable lowercase-plural; every
+    // bucket is an array (a member appears in each role bucket they hold).
+    const roleBuckets: Array<{ key: string; role: EBusinessRole }> = [
+      { key: 'owners', role: EBusinessRole.OWNER },
+      { key: 'accountants', role: EBusinessRole.ACCOUNTANT },
       { key: 'secretariats', role: EBusinessRole.SECRETARIAT },
-      { key: 'Accountants', role: EBusinessRole.ACCOUNTANT },
-      { key: 'Receptionists', role: EBusinessRole.RECEPTIONIST },
+      { key: 'receptionists', role: EBusinessRole.RECEPTIONIST },
     ];
 
-    const filteredRoles = role
-      ? roleMap.filter(
-          (r) =>
-            (r.role as string) === role || r.key === role.replace(' ', '_'),
+    const wanted = role?.trim().toUpperCase();
+    const selected = wanted
+      ? roleBuckets.filter(
+          (b) => (b.role as string) === wanted || b.key === wanted.toLowerCase(),
         )
-      : roleMap;
+      : roleBuckets;
+
+    if (wanted && selected.length === 0) {
+      throw new BadRequestException(
+        `Unknown role "${role}". Valid roles: ${roleBuckets
+          .map((b) => b.role)
+          .join(', ')}.`,
+      );
+    }
 
     // Load all members for the business once, then group/paginate in
     // memory. Staff lists are small, and this avoids fragile raw
@@ -865,62 +876,34 @@ export class BusinessService {
       order: { createdAt: 'DESC' },
     });
 
-    const results = filteredRoles.map(({ key, role }) => {
-      const matching = allMembers.filter((m) => (m.roles || []).includes(role));
-      const total = matching.length;
-      const data = matching
-        .slice(skip, skip + limit)
-        .map((m) => this.sanitizeMember(m));
-      return {
-        key,
-        data,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-          hasNext: page < Math.ceil(total / limit),
-          hasPrev: page > 1,
-        },
-      };
-    });
-
-    const result = results.reduce<Record<string, unknown>>((acc, entry) => {
-      acc[entry.key] = {
-        data: entry.data,
-        pagination: entry.pagination,
-      };
-      return acc;
-    }, {});
+    const result = selected.reduce<Record<string, unknown>>(
+      (acc, { key, role: r }) => {
+        const matching = allMembers.filter((m) =>
+          (m.roles || []).includes(r),
+        );
+        const total = matching.length;
+        const data = matching
+          .slice(skip, skip + limit)
+          .map((m) => this.sanitizeMember(m));
+        acc[key] = {
+          data,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: skip + limit < total,
+            hasPrev: page > 1,
+          },
+        };
+        return acc;
+      },
+      {},
+    );
 
     return {
       status: 'SUCCESS',
       data: result,
-      path: '',
-      timestamp: new Date().toISOString(),
-    };
-  };
-
-  getBusinessWorkers = async (userId): Promise<IResponse> => {
-    const business = await this.resolvePrimaryBusiness(userId);
-    const members = await this.businessUserService.getBusinessUsers(
-      business.id,
-    );
-
-    const groupByRole = (role: EBusinessRole) =>
-      members
-        .filter((m) => m.roles.includes(role))
-        .map((m) => this.sanitizeMember(m));
-
-    const ob: Record<string, unknown> = {};
-    ob['secretariat'] = groupByRole(EBusinessRole.SECRETARIAT);
-    const accountants = groupByRole(EBusinessRole.ACCOUNTANT);
-    ob['accountants'] = accountants.length > 0 ? accountants[0] : null;
-    ob['receptionists'] = groupByRole(EBusinessRole.RECEPTIONIST);
-
-    return {
-      status: 'SUCCESS',
-      data: ob,
       path: '',
       timestamp: new Date().toISOString(),
     };

@@ -381,9 +381,15 @@ export class BusinessController {
   @Roles(EBusinessRole.OWNER)
   @ApiOperation({
     summary: 'Get business workers',
-    description: 'Retrieves workers with pagination support',
+    description:
+      'Returns members grouped into per-role buckets: `owners`, ' +
+      '`accountants`, `secretariats`, `receptionists`. Each bucket is an ' +
+      'array with its own `pagination`. A member with multiple roles ' +
+      'appears in each matching bucket. Pass `role` to return only one ' +
+      'bucket. Sensitive fields (e.g. password) are stripped.',
   })
   @ApiOkResponse({ description: 'Business workers retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Unknown role filter value' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiQuery({
@@ -402,7 +408,9 @@ export class BusinessController {
     name: 'role',
     required: false,
     enum: EBusinessRole,
-    description: 'Filter by specific business role key',
+    description:
+      'Optional. Return only one role bucket (case-insensitive, e.g. ' +
+      'ACCOUNTANT). Omit to get all buckets.',
   })
   async getWorkers(
     @CurrentUser() user: User,
