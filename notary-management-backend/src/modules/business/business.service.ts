@@ -47,16 +47,15 @@ type UpdateBusinessDto = Partial<Business>;
 
 @Injectable()
 export class BusinessService {
-  @InjectRepository(Business)
-  businessRepository!: Repository<Business>;
-  @InjectRepository(User)
-  userRepository!: Repository<User>;
-  @InjectRepository(EmployeeLeave)
-  leaveRepository!: Repository<EmployeeLeave>;
-  @InjectRepository(BusinessUser)
-  businessUserRepository!: Repository<BusinessUser>;
-
   constructor(
+    @InjectRepository(Business)
+    private readonly businessRepository: Repository<Business>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(EmployeeLeave)
+    private readonly leaveRepository: Repository<EmployeeLeave>,
+    @InjectRepository(BusinessUser)
+    private readonly businessUserRepository: Repository<BusinessUser>,
     private readonly businessUserService: BusinessUserService,
     @Inject(forwardRef(() => BooksService))
     private readonly booksService: BooksService,
@@ -724,8 +723,7 @@ export class BusinessService {
         path: '/business/statistics',
         data: null,
         message:
-          (error as Error)?.message ||
-          'Failed to retrieve business statistics',
+          (error as Error)?.message || 'Failed to retrieve business statistics',
       };
     }
   };
@@ -854,8 +852,7 @@ export class BusinessService {
     const filteredRoles = role
       ? roleMap.filter(
           (r) =>
-            (r.role as string) === role ||
-            r.key === role.replace(' ', '_'),
+            (r.role as string) === role || r.key === role.replace(' ', '_'),
         )
       : roleMap;
 
