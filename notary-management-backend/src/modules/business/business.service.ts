@@ -265,7 +265,7 @@ export class BusinessService {
   async getBusinessById(ownerId: string, businessId: string) {
     const business = await this.businessRepository.findOne({
       where: { id: businessId },
-      relations: ['ownerUser', 'paymentMethods', 'subscriptions'],
+      relations: ['ownerUser'],
     });
 
     if (!business) {
@@ -288,7 +288,7 @@ export class BusinessService {
   async byId(businessId: string) {
     const business: Business | null = await this.businessRepository.findOne({
       where: { id: businessId },
-      relations: ['ownerUser', 'paymentMethods', 'subscriptions'],
+      relations: ['ownerUser'],
     });
 
     if (!business) {
@@ -646,7 +646,7 @@ export class BusinessService {
   ) {
     const business = await this.businessRepository.findOne({
       where: { id: businessId },
-      relations: ['ownerUser', 'subscriptions'],
+      relations: ['ownerUser'],
     });
 
     if (!business) {
@@ -738,7 +738,7 @@ export class BusinessService {
 
       // Get businesses with pagination and owner information
       const [businesses, total] = await this.businessRepository.findAndCount({
-        relations: ['ownerUser', 'paymentMethods', 'stock'],
+        relations: ['ownerUser'],
         skip,
         take: limit,
         order: { createdAt: 'DESC' },

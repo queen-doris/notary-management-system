@@ -124,7 +124,7 @@ export class BusinessQueryDto {
 
   @ApiProperty({
     description:
-      'Include relations (paymentMethods, stock, products). Default: false. Use true for admin.',
+      'Return full business objects (incl. owner) instead of a simplified summary. Default: false.',
     required: false,
     type: Boolean,
     default: false,
