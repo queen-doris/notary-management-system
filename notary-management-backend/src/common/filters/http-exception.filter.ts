@@ -25,6 +25,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     // console.log('Request body:', request.body);
     // console.log('Request headers:', request.headers);
 
+    const isProduction = process.env.NODE_ENV === 'production';
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
     let error: any = null;
@@ -40,6 +42,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         message = (res as any).message;
       }
       error = res;
+    } else if (exception instanceof Error) {
+      // A raw Error serializes to `{}` via JSON.stringify because
+      // name/message/stack are non-enumerable. Surface them explicitly so
+      // 500s are diagnosable instead of opaque.
+      message = isProduction
+        ? 'Internal server error'
+        : exception.message || 'Internal server error';
+      error = {
+        name: exception.name,
+        message: exception.message,
+        ...(isProduction ? {} : { stack: exception.stack }),
+      };
     } else {
       error = exception;
     }
@@ -57,7 +71,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       message: Array.isArray(message) ? message.join(', ') : message,
-      error: process.env.NODE_ENV === 'development' ? error : undefined,
+      error: isProduction ? undefined : error,
       data: null,
     };
 

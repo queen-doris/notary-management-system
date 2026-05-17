@@ -8,8 +8,10 @@ import {
   ConflictException,
   ForbiddenException,
   forwardRef,
+  HttpException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -820,6 +822,23 @@ export class BusinessService {
     limit: number = 10,
     role?: string,
   ): Promise<IResponse> => {
+    try {
+      return await this.getBusinessWorkersPInner(userId, page, limit, role);
+    } catch (err) {
+      if (err instanceof HttpException) throw err;
+      const e = err as Error;
+      throw new InternalServerErrorException(
+        `Failed to retrieve business workers: ${e?.message ?? 'unknown error'}`,
+      );
+    }
+  };
+
+  private getBusinessWorkersPInner = async (
+    userId: string,
+    page: number = 1,
+    limit: number = 10,
+    role?: string,
+  ): Promise<IResponse> => {
     const business = await this.resolvePrimaryBusiness(userId);
     const skip = (page - 1) * limit;
 
@@ -849,7 +868,9 @@ export class BusinessService {
         (m.roles || []).includes(role),
       );
       const total = matching.length;
-      const data = matching.slice(skip, skip + limit);
+      const data = matching
+        .slice(skip, skip + limit)
+        .map((m) => this.sanitizeMember(m));
       return {
         key,
         data,
@@ -887,9 +908,11 @@ export class BusinessService {
     );
 
     const groupByRole = (role: EBusinessRole) =>
-      members.filter((m) => m.roles.includes(role));
+      members
+        .filter((m) => m.roles.includes(role))
+        .map((m) => this.sanitizeMember(m));
 
-    const ob: Record<string, BusinessUser[] | BusinessUser | null> = {};
+    const ob: Record<string, unknown> = {};
     ob['secretariat'] = groupByRole(EBusinessRole.SECRETARIAT);
     const accountants = groupByRole(EBusinessRole.ACCOUNTANT);
     ob['accountants'] = accountants.length > 0 ? accountants[0] : null;
@@ -1165,7 +1188,7 @@ export class BusinessService {
 
     return {
       status: 'SUCCESS',
-      data: membership,
+      data: this.sanitizeMember(membership),
       path: '',
       timestamp: new Date().toISOString(),
     };
@@ -1175,6 +1198,43 @@ export class BusinessService {
    * Get subscription summary (admin only)
    * Returns total revenue, active subscriptions count, and recent transactions
    */
+
+  /**
+   * Strip sensitive fields (notably user.password) from a BusinessUser
+   * before it leaves the service. Keeps `userId`/`user.id` so callers that
+   * resolve workers by id (e.g. putOnLeave) keep working.
+   */
+  private sanitizeMember(m: BusinessUser | null | undefined) {
+    if (!m) return m;
+    const u = m.user;
+    return {
+      id: m.id,
+      userId: m.userId,
+      businessId: m.businessId,
+      roles: m.roles,
+      staffCode: m.staffCode,
+      employmentStatus: m.employmentStatus,
+      hireDate: m.hireDate,
+      jobTitle: m.jobTitle,
+      salary: m.salary,
+      isClockedIn: m.isClockedIn,
+      lastClockInAt: m.lastClockInAt,
+      lastClockOutAt: m.lastClockOutAt,
+      createdAt: m.createdAt,
+      updatedAt: m.updatedAt,
+      user: u
+        ? {
+            id: u.id,
+            fullNames: u.fullNames,
+            email: u.email,
+            phone: u.phone,
+            isVerified: u.isVerified,
+            role: u.role,
+            status: u.status,
+          }
+        : u,
+    };
+  }
 
   private async resolvePrimaryBusiness(userId: string): Promise<Business> {
     const user: User | null = await this.userRepository.findOne({
